@@ -1,0 +1,15 @@
+# Local environment
+.venv/
+
+# Upstream competition starter kit (cloned separately; see README)
+external/
+
+# Data, outputs, checkpoints
+data/
+outputs/
+*.pt
+*.ckpt
+*.zip
+
+__pycache__/
+*.pyc
