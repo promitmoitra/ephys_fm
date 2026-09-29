@@ -13,3 +13,6 @@ outputs/
 
 __pycache__/
 *.pyc
+
+# Claude Code: share project skills, keep per-machine settings local
+.claude/settings.local.json
