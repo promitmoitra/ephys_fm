@@ -96,7 +96,8 @@ triggering re-downloads (each step verified by reloading the raw data):
 
 | Experiment | Question | Result |
 |---|---|---|
-| [`fingerprint_tangermann`](experiments/fingerprint_tangermann/results/results.md) | Can one 4-s EEG window identify the subject on a different day, and does routing to per-subject decoders help? | Subject ID day 1 → day 2: 0.909 balanced acc (EEGNet; chance 0.111). Soft routing recovers ~77% of the oracle per-subject gain in 4-class MI (0.490 → 0.553, oracle 0.572) |
+| [`fingerprint_tangermann`](experiments/fingerprint_tangermann/results/results.md) | Can one 4-s EEG window identify the subject on a different day, and does routing to per-subject decoders help? | Subject ID day 1 → day 2: 0.909 balanced acc (EEGNet; chance 0.111). Against a *pooled Riemannian* baseline, soft routing looked useful in 4-class MI (0.490 → 0.553, oracle 0.572), but the fair EEGNet test below reverses this |
+| [`routing_eegnet`](experiments/fingerprint_tangermann/results/routing_eegnet.md) | Same trunk, same budget: does routing to per-subject EEGNet heads beat a pooled EEGNet? (5 seeds) | **No.** Pooled 0.692 ± 0.007; per-subject heads with oracle ID 0.661 (−0.030, 0/5 seeds), soft-routed 0.645, uniform-average control 0.595. Fingerprint still 0.886 ± 0.046. Don't build hard routing into Track 2; the pooled deep model is the baseline |
 
 ## Submissions
 
