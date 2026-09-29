@@ -30,9 +30,12 @@ uv pip install torch torchvision torchaudio --index-url https://download.pytorch
 uv pip install -r external/2026-competition/requirements.txt
 ```
 
-Run benchopt from the kit root (`cd external/2026-competition`). Quieter logs, as on the platform:
+Run benchopt from the kit root (`cd external/2026-competition`). Keep data in the
+gitignored `data/` at our repo root (shared by all tracks, survives re-cloning the
+kit), with quieter logs as on the platform:
 
 ```bash
+export BENCHOPT_DATA_HOME="$(realpath ../../data)"
 export PYTHONWARNINGS=ignore::FutureWarning MNE_LOGGING_LEVEL=ERROR TQDM_DISABLE=1
 ```
 
@@ -56,6 +59,26 @@ COMPET_SUBMISSION_DIR="$PWD/my_submission" benchopt run tracks/<track> -d Simula
 `<Objective>` is `Image-decoding`, `BCI-decoding`, `Sleep-onset` or `EMG-pose`.
 A submission ZIP holds `submission.py` (with `class Solver(CompetSolver)`) and
 its weights **at the ZIP root**; see the kit's `codabench/pages/participate.md`.
+
+## Data
+
+Prepared with `benchopt prepare tracks/<track> --config tracks/<track>/training.yml`
+into `$BENCHOPT_DATA_HOME/neural_compet/`.
+
+| Track | Warm-up data | Status | On disk | Floor score (warm-up split) |
+|---|---|---|---|---|
+| 1 | THINGS-EEG2 (59 GB) | — | | |
+| 2 | Dreyer 2023 (19 GB) | — | | |
+| 3 | Sleep-EDF | ✅ prepared | 26 GB | Median: W-bMAE 205.4 s, MAE 448.8 s |
+| 4 | EMG2Pose | — | | |
+
+Sleep-EDF notes: the S3 seed takes ~30 min and extraction ~10 min on 8 CPUs /
+16 GB RAM. The 26 GB is 7 GB of flat EDFs (what the loader reads), a redundant
+7 GB wget-layout copy under `physionet-sleep-data/physionet.org/…` (the kit only
+checks that this folder exists, as its "seeded" marker), and a 12 GB extraction
+cache.
+
+## Submissions
 
 `submissions/floor/floor_<track>.zip` are the constant baselines. Upload one per
 track first to confirm ingestion and scoring work end to end.
