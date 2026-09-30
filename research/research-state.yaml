@@ -5,7 +5,7 @@ project:
   question: >
     Which per-window person-ID model gives the most accurate and best-calibrated p(person | window)
     for the 21 Dreyer evaluation people, so that soft routing keeps more of the oracle-ID gain?
-  status: active
+  status: concluding
   started: "2026-09-30"
   domain: "EEG biometrics / BCI decoding (Track 2)"
   worktree: ".claude/worktrees/t2-fingerprint"
@@ -28,7 +28,8 @@ literature:
 hypotheses:
   - id: H0
     statement: "Baseline re-measurement: EEGNet, 150 epochs fixed, last epoch"
-    status: active
+    status: done
+    result: "R3 0.745 +- 0.10, NLL 1.34"
     priority: high
   - id: H1
     statement: "Train on all of R1-R3 with a fixed budget (50% more data per person) -> better hidden-run fingerprint"
@@ -60,10 +61,23 @@ hypotheses:
     result: "ts_fb R1->R3 1.000; BNCI cross-day 0.974 vs broadband 0.872"
   - id: H3.2
     statement: "Which bands carry stable identity (alpha predicted best cross-day)"
-    status: active
+    status: supported
+    result: "8-13 Hz alone 0.975 cross-day; 1-4 Hz 0.710 (day-specific)"
+  - id: H3.3
+    statement: "Finer filter banks improve cross-day ID"
+    status: refuted
+    result: "won on BNCI2014, lost on held-out BNCI2015_001 and Zhou2016; fb6 stays"
+  - id: H11
+    statement: "Calibrating on more days makes cross-day ID robust"
+    status: supported
+    result: "2 days -> day 3: BNCI2015_001 1.000, Zhou2016 0.975 (1 day 0.935 / 0.790); data-matched similar"
+  - id: H12
+    statement: "Channel count explains the held-out cross-day gap"
+    status: refuted
+    result: "BNCI2014 13 ch 0.971 vs 22 ch 0.974; matters for 21-way Dreyer (6 ch 0.869 -> 27 ch 1.000)"
   - id: H6
     statement: "EEGNet + ts_fb equal-weight ensembles (D1, D2)"
-    status: pending (waits for H3.1 EEGNet arms)
+    status: refuted
   - id: H9
     statement: "Pure-torch export of ts_fb_C1 reproduces sklearn"
     status: supported
@@ -82,9 +96,9 @@ experiments:
     - {run_id: confirm-1_ts_fb, metric: "R4-R6 0.996 / 0.044; mixture 0.907 (oracle 0.9075)"}
 
 outer_loop:
-  cycle: 1
-  last_direction: deepen+broaden
-  last_reflection: "Dreyer routing gap closed (soft = oracle). Next: cross-day robustness (BNCI worst person 0.77), band mechanism (H3.2), shippable torch module (done, H9)."
+  cycle: 3
+  last_direction: conclude
+  last_reflection: "Conclude: fb6 covariance fingerprint confirmed (R4-R6 0.996, mixture = oracle), mechanism (alpha/beta stable, delta day-specific), cross-day lever = multi-day calibration. Deliverable: research/src/torch_fp.py; integration into submission.py is the handoff's next step."
 
 workspace:
   findings: "research/findings.md"

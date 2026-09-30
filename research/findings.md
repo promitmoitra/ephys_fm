@@ -44,6 +44,13 @@ on all calibration sessions pooled.**
 (Zhou2016: `fb6` 0.807 vs 0.732 / 0.710). The locked selection rule plus the held-out check
 kept us from shipping an overfit choice. `fb6` stays.
 
+**Channel count is not why the held-out datasets are harder (H12).** BNCI2014 cut to random
+13-channel subsets still scores 0.971 ± 0.014 across days (9 channels 0.967; all 22 0.974), so
+the weaker BNCI2015_001 / Zhou2016 numbers come from a few people whose signature shifts
+between days. Channel count does matter for **many-way ID with little data**: Dreyer 21-way
+from one training run goes 0.869 (6 channels) → 0.958 (13) → 1.000 (27). The sealed phase
+(10 people, 43 EEG channels, several calibration days) is in the comfortable regime.
+
 **EEGNet adds nothing on top (H6).** Equal-weight EEGNet + `ts_fb` ensembles were below
 `ts_fb` alone everywhere.
 
@@ -102,8 +109,6 @@ Cross-day, `fb6` (balanced accuracy / NLL):
 
 ## Open Questions
 
-- H12 (running): does channel count explain the weaker held-out cross-day numbers?
-  (BNCI2014 at 6 channels still scores 0.943 ± 0.046, so probably only partly.)
 - If a person had only one calibration day, could other people's day-to-day variation
   (estimated from people with several days) be projected out of the tangent space?
   (Not needed if the sealed phase gives 3 days per person.)
