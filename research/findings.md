@@ -16,7 +16,18 @@ Nothing measured yet under the locked protocol. Prior evidence (before this loop
 
 ## Key Results
 
-(none yet)
+**Riemannian fingerprints are near-perfect within a Dreyer session** (H3, H3.1). Tangent space +
+multinomial LR, deterministic:
+
+| Benchmark (dev only) | ts_broad_C1 | ts_fb_C1 (6 bands) |
+|---|---|---|
+| R1–R2 → R3 (locked inner loop) | 0.987 / NLL 0.107 | **1.000 / NLL 0.027** |
+| R1 → R2 (one training run) | 0.967 / 0.153 | 0.996 / 0.065 |
+| R1 → R3 (two runs later) | 0.976 / 0.188 | 1.000 / 0.052 |
+| BNCI session 1 → 2 (cross-day, 9-way) | 0.872 / 0.403 | (running) |
+
+No decay with run distance inside a session: R1 → R3 is as good as R1 → R2. The shipped
+EEGNet fingerprint scored 0.857 on R3 with epoch selection *on R3* (biased) and 0.744 on R4–R6.
 
 ## Patterns and Insights
 
