@@ -181,6 +181,49 @@ def build_xfit(args):
     summarize(bank)
 
 
+def build_test_seed(args):
+    """Test bank for another training seed: pooled on pool + R1-R3 (epoch on val), per-person
+    fine-tunes on R1-R3 (the train_mixture recipe), EEGNet experts predict R4-R6. The
+    classical experts are deterministic, so they are copied from the packaged test bank."""
+    d = load_windows()
+    X, y, subj, split = d["X"], d["y"], d["subject"], d["split"]
+    people, calib, target = setting(d, 3)
+    n_chans, n_times = X.shape[1:]
+    C = int(y.max()) + 1
+    pooled_path = OUT / f"pooled_test_seed{args.seed}.pt"
+    pool = (split == "train") | calib
+    val = split == "val"
+    if pooled_path.exists():
+        pooled = make_eegnet(n_chans, C, n_times)
+        ck = torch.load(pooled_path, weights_only=True)
+        pooled.load_state_dict(ck["state"])
+        info = ck["info"]
+    else:
+        log(f"pooled EEGNet (test, seed {args.seed}): {pool.sum()} windows")
+        pooled, info = fit(make_eegnet(n_chans, C, n_times), X[pool], y[pool], lr=1e-3,
+                           epochs=args.epochs, seed=args.seed, bs=64, X_val=X[val],
+                           y_val=y[val], name="pooled", log_every=5)
+        torch.save({"state": pooled.state_dict(), "info": info}, pooled_path)
+        log(f"saved {pooled_path.name} ({info})")
+    Xt = X[target]
+    experts = []
+    for s in people:
+        m = calib & (subj == s)
+        e, _ = fit(copy.deepcopy(pooled), X[m], y[m], lr=1e-4, epochs=args.ft_epochs,
+                   seed=args.seed, bs=32)
+        experts.append(e)
+    torch.save({"experts": [e.state_dict() for e in experts]},
+               OUT / f"experts_test_seed{args.seed}.pt")
+    ref = np.load(OUT / "bank_test_packaged.npz")
+    bank = {k: ref[k] for k in ref.files if k != "eegnet"}
+    assert (bank["y"] == y[target]).all()
+    bank["eegnet"] = expert_logp(experts, Xt)
+    bank["pooled"] = log_softmax_np(logits(pooled, Xt).numpy())
+    path = OUT / f"bank_test_seed{args.seed}.npz"
+    np.savez(path, **bank, pooled_info=json.dumps(info))
+    log(f"saved {path} (confirmation only)")
+
+
 def packaged_mixture(d, people):
     sys.path.insert(0, str(REPO / "track2"))
     from submission import build_model
@@ -227,7 +270,7 @@ def summarize(bank):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("bank", choices=["dev", "test", "xfit"])
+    ap.add_argument("bank", choices=["dev", "test", "xfit", "testseed"])
     ap.add_argument("--holdout", type=int, default=2, help="dev: held-out calib run (0-2)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--epochs", type=int, default=100)
@@ -241,7 +284,8 @@ def main():
         OUT = OUT / "smoke"
         args.epochs = args.ft_epochs = 1
     OUT.mkdir(parents=True, exist_ok=True)
-    {"dev": build_dev, "test": build_test, "xfit": build_xfit}[args.bank](args)
+    {"dev": build_dev, "test": build_test, "xfit": build_xfit,
+     "testseed": build_test_seed}[args.bank](args)
 
 
 if __name__ == "__main__":
