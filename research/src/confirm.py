@@ -87,7 +87,7 @@ def main():
                              "p_true": m["p_true"], **{f"mix_{k}": v for k, v in mix.items()},
                              "wall_s": round(time.time() - t0, 1)}
             fp.log(f"{name}: mixture {mix}")
-    (exp_dir / "results" / "summary.json").write_text(json.dumps(summary, indent=2))
+    (exp_dir / "results" / f"summary_{args.candidates.replace(',', '+')}.json").write_text(json.dumps(summary, indent=2))
 
 
 if __name__ == "__main__":
