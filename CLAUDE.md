@@ -10,6 +10,12 @@ this protocol before running any git command.
 | `/home/promit/Documents/ephys_fm` (main checkout) | `main`, always | Integration and packaging submissions only |
 | `.claude/worktrees/track2` | currently `exp/dreyer-eog` | Track 2 (BCI decoding) competition work |
 | `.claude/worktrees/data-atlas` | `research/data-atlas` | Data atlas research track ([vision](docs/atlas/vision.md)) |
+| `.claude/worktrees/t2-fingerprint` | `exp/fingerprint-model` | Track 2 autoresearch loop A: a better per-window fingerprint (person ID) model |
+| `.claude/worktrees/t2-expert-weights` | `exp/expert-weights` | Track 2 autoresearch loop B: learned weights for combining per-person EEGNet and Riemannian experts |
+
+The two Track 2 research loops run in parallel with a shared heartbeat. Each writes run artifacts
+to its own subfolder of the shared `outputs/` (`outputs/t2-fingerprint/`, `outputs/t2-expert-weights/`)
+and only reads the shared `data/` caches.
 
 `git worktree list` shows the current set.
 
