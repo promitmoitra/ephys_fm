@@ -33,3 +33,8 @@
   +0.012–0.014 (CI > 0 for log-linear), NLL 0.209–0.213 vs 0.235. **Adopted C3.**
 - **Outer loop 2: DEEPEN (robustness).** Protocol 04: seeds 1, 2 of the test-time EEGNet
   experts; 20:35 launched.
+- 20:45 Experiment 05 (engineering): torch export of ts_C0.1 experts + C3 matches the
+  research pipeline (|Δp| 2e-8, oracle 0.921); run the ts path in float64.
+- 20:55 Protocol 06 locked: zero-shot transfer of the Dreyer coefficients to BNCI 2014-001
+  (4-class, cross-session, 5 seeds). Classical stage done: ts 0.665, ts_C0.1 0.654 on
+  session 2; reliability spread 0.31–0.77 (4-class scale). EEGNet stage running.

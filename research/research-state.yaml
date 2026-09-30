@@ -25,6 +25,7 @@ hypotheses:
   - {id: H8, statement: "Per-person reliability weights for ts", status: supported, note: "rel predicts held-out ts acc r=0.94-0.99; best dev NLL; +0.004 over H3 on ts_C0.1 (criterion 0.005 narrowly missed); adopted as C3"}
   - {id: H9, statement: "Better classical expert", status: partly-supported, note: "bands/windows don't help; regularisation C=0.1 (calibration) does; ts_C0.1 selected"}
   - {id: H10, statement: "Gain robust to EEGNet training seed", status: active, note: "protocol 04"}
+  - {id: H11, statement: "Dreyer-fitted coefficients transfer zero-shot to BNCI 2014-001", status: active, note: "protocol 06"}
 
 experiments:
   proxy_metric: "Dev bank (experts on R1-R2 -> R3), true ID, out-of-fold balanced accuracy (LOPO for global, within-person 2-fold x5 for per-person); NLL secondary"
@@ -39,6 +40,7 @@ jobs:
   - {name: bank_xfit_seed0, status: done}
   - {name: bank_test_seed1, started: "2026-09-30 20:35", log: outputs/t2-expert-weights/bank_test_seed1.log}
   - {name: bank_test_seed2, started: "2026-09-30 20:35", log: outputs/t2-expert-weights/bank_test_seed2.log}
+  - {name: bnci_experts, started: "2026-09-30 20:57", log: outputs/t2-expert-weights/bnci/experts.log}
 next: "when seed 1/2 test banks finish: run research/experiments/04-seed-robustness/code/run.py; analysis; progress report; then integration plan"
 
 outer_loop:
