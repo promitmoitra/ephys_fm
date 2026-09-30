@@ -1,0 +1,16 @@
+{
+  "eligible": [
+    "fb6",
+    "fb5_nodelta",
+    "fine9_4hz",
+    "fine18",
+    "fine36",
+    "fine11_8_30"
+  ],
+  "tied": [
+    "fine18",
+    "fine36",
+    "fine11_8_30"
+  ],
+  "selected": "fine11_8_30"
+}
