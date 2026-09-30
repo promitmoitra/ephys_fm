@@ -35,11 +35,17 @@ def _notch(sfreq):
     return sorted({k * b for b in (50.0, 60.0) for k in range(1, 7) if k * b < sfreq / 2})
 
 
-def preprocess_run(raw, t0):
+def preprocess_run(raw, t0, event_id):
     import mne
     from sklearn.preprocessing import RobustScaler
     raw = raw.copy().load_data()
-    events = mne.find_events(raw, shortest_event=0, verbose=False)
+    if "stim" in raw.get_channel_types():
+        events = mne.find_events(raw, shortest_event=0, verbose=False)
+        events = events[np.isin(events[:, 2], list(event_id.values()))]
+    else:                                    # BIDS versions: cues as annotations
+        present = set(raw.annotations.description)
+        events, _ = mne.events_from_annotations(
+            raw, event_id={k: v for k, v in event_id.items() if k in present}, verbose=False)
     onsets = (events[:, 0] - raw.first_samp) / raw.info["sfreq"]
     raw.pick("eeg")
     raw.notch_filter(_notch(raw.info["sfreq"]), verbose=False)
@@ -64,7 +70,7 @@ def build(name):
         sessions = ds.get_data([subj])[subj]
         for s_idx, s_name in enumerate(sorted(sessions)):
             for r_idx, r_name in enumerate(sorted(sessions[s_name])):
-                X, y = preprocess_run(sessions[s_name][r_name], t0)
+                X, y = preprocess_run(sessions[s_name][r_name], t0, ds.event_id)
                 n = len(y)
                 parts["X"].append(X)
                 parts["task"].append(y)
