@@ -85,6 +85,31 @@ def forest_svg(dev, test):
     return "\n".join(s)
 
 
+def gain_svg(items):
+    """Single-series dot + whisker: C3's gain over EEGNet alone in each setting."""
+    W, left, right, row, top = 640, 210, 24, 30, 16
+    lo, hi = -0.01, 0.08
+    H = top + len(items) * row + 34
+
+    def x(v):
+        return left + (v - lo) / (hi - lo) * (W - left - right)
+    s = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-labelledby="f3t" class="chart">',
+         '<title id="f3t">Gain of the adopted rule over EEGNet alone, per setting</title>']
+    for v in np.arange(0.0, 0.081, 0.02):
+        s.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 6}" y2="{H - 28}" '
+                 f'class="{"zero" if abs(v) < 1e-9 else "grid"}"/>')
+        s.append(f'<text x="{x(v):.1f}" y="{H - 10}" class="tick" text-anchor="middle">{v:+.2f}</text>')
+    for i, (lab, m, a, b) in enumerate(items):
+        yy = top + 10 + i * row
+        s.append(f'<text x="0" y="{yy + 4}" class="lab">{escape(lab)}</text>')
+        s.append(f'<g class="pt"><title>{escape(lab)}: {m:+.3f} [{a:+.3f}, {b:+.3f}]</title>'
+                 f'<rect x="{left}" y="{yy - 12}" width="{W - left - right}" height="24" fill="transparent"/>'
+                 f'<line x1="{x(a):.1f}" x2="{x(b):.1f}" y1="{yy}" y2="{yy}" class="s1 ci"/>'
+                 f'<circle cx="{x(m):.1f}" cy="{yy}" r="5" class="s1 dot"/></g>')
+    s.append("</svg>")
+    return "\n".join(s)
+
+
 def scatter_svg(pts):
     W, H, l, b_, t_, r_ = 640, 330, 52, 44, 16, 16
 
@@ -144,9 +169,30 @@ details{margin:6px 0}code{font-size:.85em}
 """
 
 
+def robustness():
+    seeds = json.loads((EXP / "04-seed-robustness" / "results" / "seeds.json").read_text())
+    bnci = json.loads((EXP / "06-bnci-transfer" / "results" / "bnci.json").read_text())
+    items = []
+    for sd in ["0", "1", "2"]:
+        m, a, b = seeds[sd]["C3"]["vs_R0"][:3]
+        items.append((f"Dreyer R4–R6, seed {sd}", m, a, b))
+    d = np.array([bnci[s]["C3"]["bal_acc"] - bnci[s]["R0"]["bal_acc"] for s in bnci])
+    items.append(("BNCI, 5 seeds (± 2 SD)", d.mean(), d.mean() - 2 * d.std(), d.mean() + 2 * d.std()))
+    rows = "".join(
+        f"<tr><td>{sd}</td>" + "".join(f"<td class=n>{seeds[sd][c]['bal_acc']:.3f} / "
+                                        f"{seeds[sd][c]['nll']:.3f}</td>" for c in ["R0", "R1", "C1", "C3"])
+        + "</tr>" for sd in ["0", "1", "2"])
+    brow = "".join(
+        f"<tr><td>{k}</td><td class=n>{np.mean([bnci[s][k]['bal_acc'] for s in bnci]):.3f}</td>"
+        f"<td class=n>{np.mean([bnci[s][k]['nll'] for s in bnci]):.3f}</td></tr>"
+        for k in bnci["0"])
+    return items, rows, brow
+
+
 def main():
     dev, pts = dev_effects()
     test, c2 = test_effects()
+    items, seed_rows, bnci_rows = robustness()
     rows = "".join(
         f"<tr><td>{k}</td><td class=n>{dev[k][0]:+.3f} [{dev[k][1]:+.3f}, {dev[k][2]:+.3f}]</td>"
         f"<td class=n>{test[k][0]:+.3f} [{test[k][1]:+.3f}, {test[k][2]:+.3f}]</td></tr>"
@@ -161,16 +207,16 @@ def main():
     html = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Loop B Progress</title><style>{CSS}</style></head><body><main>
-<p class="sub">Track 2 · autoresearch loop B · report 001 · 2026-09-30</p>
+<p class="sub">Track 2 · autoresearch loop B · report 002 (final) · 2026-10-01</p>
 <h1>Learned weights for per-person experts</h1>
 <p>Each evaluation person has a fine-tuned EEGNet expert and a Riemannian tangent-space (ts)
 expert. The question: which combination rule, learned on calibration data only, is best on the
 hidden runs? All numbers are on the Dreyer sealed-phase simulation with oracle person ID,
 unless marked soft-routed.</p>
 <div class="tiles">
-<div class="tile"><span>EEGNet alone, R4–R6</span><b>0.908</b><span>NLL 0.235</span></div>
-<div class="tile"><span>Adopted rule C3, R4–R6</span><b>0.921</b><span>NLL 0.209</span></div>
-<div class="tile"><span>C3 soft-routed with loop A's fingerprint</span><b>{c2['C3'].get('soft_fp_loopA', c2['C3']['soft_fp_packaged'])['bal_acc']:.3f}</b><span>EEGNet alone 0.907</span></div>
+<div class="tile"><span>EEGNet experts, R4–R6, 3 seeds</span><b>0.898</b><span>NLL 0.253</span></div>
+<div class="tile"><span>Adopted rule C3, R4–R6, 3 seeds</span><b>0.917</b><span>NLL 0.215</span></div>
+<div class="tile"><span>C3 soft-routed with loop A's fingerprint, seed 0</span><b>{c2['C3'].get('soft_fp_loopA', c2['C3']['soft_fp_packaged'])['bal_acc']:.3f}</b><span>EEGNet alone 0.907</span></div>
 </div>
 
 <h2>1 · The plain average was the wrong rule; log-space pooling is robust</h2>
@@ -199,6 +245,21 @@ were committed before this ran.</p>
 <table><tr><th>ID</th><th>Rule</th><th class=n>Oracle acc</th><th class=n>NLL</th>
 <th class=n>Soft (loop A fp)</th></tr>{ctab}</table>
 
+<h2>4 · Robust across seeds, and it transfers to another dataset</h2>
+<p>The same C3 coefficients, fitted once on the seed-0 dev bank, were applied to EEGNet experts
+from two more training seeds and, zero-shot, to BNCI 2014-001 (4 classes, 9 people, calibration
+and test a day apart). The gain is larger when the EEGNet experts are weaker. It is largest
+across a day gap, where the EEGNet expert becomes over-confident.</p>
+<div class="card">{gain_svg(items)}</div>
+<details><summary>Table view: Dreyer per seed (acc / NLL)</summary><table><tr><th>Seed</th>
+<th class=n>EEGNet</th><th class=n>Plain avg</th><th class=n>C1</th><th class=n>C3</th></tr>
+{seed_rows}</table></details>
+<details><summary>Table view: BNCI, mean of 5 seeds</summary><table><tr><th>Rule</th>
+<th class=n>Acc</th><th class=n>NLL</th></tr>{bnci_rows}</table></details>
+<p>On BNCI, the best weights reverse (≈ 0.67 EEGNet / 0.83 ts, exploratory). The transferred
+Dreyer weights capture about 77% of BNCI's best gain. For the cross-day sealed phase, refit the
+four coefficients on a leave-one-calibration-session-out bank.</p>
+
 <h2>What I learned about the method</h2>
 <ul><li>A 40-window-per-person dev set (R3 only) gave the <em>wrong sign</em> for the ts effect.
 Cross-fitting all calibration runs tripled the dev data; even then, rules differ by less than
@@ -206,15 +267,15 @@ the ±0.011 CI. The consistent signal is the NLL gain of log-space pooling.</li>
 <li>Filter banks, other windows and CSP don't make a better classical expert. Regularising it
 (C = 0.1) does, because it fixes calibration.</li></ul>
 
-<h2>Next</h2>
-<ul><li><b>Running:</b> seed robustness. EEGNet experts for training seeds 1 and 2, with
-the same combiners applied unchanged (protocol 04).</li>
-<li>Then: an integration plan for <code>submission.py</code> (per-person tangent-space + LR as
-torch tensors, like loop A's fingerprint export), and a PR.</li></ul>
+<h2>Status: concluded</h2>
+<ul><li>Torch export of the per-person ts experts and C3 verified against the research pipeline
+(|Δp| 2e-8 in float64; oracle 0.921 reproduced).</li>
+<li>Next (joint with loop A): integrate the filter-bank fingerprint and C3 into
+<code>submission.py</code> and re-run the kit contract check.</li></ul>
 <p class="sub">Source: <code>research/</code> in worktree <code>t2-expert-weights</code>, branch
 <code>exp/expert-weights</code>. Protocols were committed before their results.</p>
 </main></body></html>"""
-    out = R / "to_human" / "report-001.html"
+    out = R / "to_human" / "report-002.html"
     out.write_text(html)
     print(out)
 
