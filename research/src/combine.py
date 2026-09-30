@@ -279,3 +279,20 @@ def eval_person_loro(bank, make, experts):
             c = make(experts).fit({e: v[tr] for e, v in F.items()}, y[tr])
             oof[te] = c.predict({e: v[te] for e, v in F.items()})
     return _summary(y, t, oof, K) | {"oof": oof}
+
+
+class RelLogLinear(Combiner):
+    """H8: log-linear + bias where the classical expert's weight depends on a per-person
+    calibration reliability score: z = w_e·log p_eeg + (w0 + w1·(rel − 0.5))·log p_cls + b.
+    experts = [eeg, cls, rel_key]; F[rel_key] has shape (..., 1)."""
+
+    def init(self):
+        return {"w": torch.tensor([0.8, 0.4, 0.0], dtype=torch.float64),
+                "b": torch.zeros(1, dtype=torch.float64)}
+
+    def combine(self, F, theta):
+        eeg, cls, rel = self.experts
+        wc = theta["w"][1] + theta["w"][2] * (F[rel] - 0.5)
+        z = theta["w"][0] * F[eeg] + wc * F[cls]
+        z = z + torch.cat([torch.zeros_like(theta["b"]), theta["b"]])
+        return torch.log_softmax(z, -1)

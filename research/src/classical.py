@@ -103,3 +103,29 @@ def test_fit(variant, E=None, people=None):
     if E is None:
         E, people = _load()
     return _fit_predict(E, people, variant, [0, 1, 2], E["run"] >= 3)
+
+
+def reliability(variant, E=None, people=None):
+    """Per-person calibration-only reliability of a classical expert: accuracy of a model
+    trained on one calibration run and tested on another.
+    Returns rel_dev (3, K): for held-out run r, the mean over the two ordered pairs of the
+    other runs; rel_test (K,): the mean over all 6 ordered pairs of R1–R3."""
+    if E is None:
+        E, people = _load()
+    bands, win, C, scale = VARIANTS[variant]
+    Xb = _banded(E["X"], bands, win)
+    acc = np.full((3, 3, len(people)), np.nan)          # [train run, test run, person]
+    for j, s in enumerate(people):
+        for a in range(3):
+            ma = (E["subject"] == s) & (E["run"] == a)
+            model = FBTangent(bands, C, scale).fit([x[ma] for x in Xb], E["y"][ma])
+            for b in range(3):
+                if b == a:
+                    continue
+                mb = (E["subject"] == s) & (E["run"] == b)
+                p = model.predict_logp([x[mb] for x in Xb]).argmax(1)
+                acc[a, b, j] = np.mean([np.mean(p[E["y"][mb] == c] == c) for c in (0, 1)])
+    rel_dev = np.stack([np.nanmean([acc[a, b] for a in range(3) for b in range(3)
+                                    if a != b and r not in (a, b)], 0) for r in range(3)])
+    rel_test = np.nanmean([acc[a, b] for a in range(3) for b in range(3) if a != b], 0)
+    return rel_dev, rel_test
