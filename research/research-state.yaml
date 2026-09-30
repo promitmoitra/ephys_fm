@@ -22,29 +22,33 @@ hypotheses:
   - {id: H5, statement: "Per-expert temperature before pooling", status: refuted-as-predicted, note: "EEGNet is calibrated (T<1 learned); ts is the over-confident expert"}
   - {id: H6, statement: "Confidence gating per window", status: refuted, note: "where EEGNet is unsure, ts is even worse (0.61 vs 0.69)"}
   - {id: H7, statement: "CSP with a learned weight", status: supported, note: "weight ~0.04; CSP adds nothing"}
-  - {id: H8, statement: "Per-person reliability weights for ts (CAWPE-style; ts is near-perfect for ~6 people, chance for ~9)", status: pending, priority: high}
-  - {id: H9, statement: "Better classical expert (filter-bank tangent space) makes combination pay", status: pending, priority: high}
+  - {id: H8, statement: "Per-person reliability weights for ts", status: supported, note: "rel predicts held-out ts acc r=0.94-0.99; best dev NLL; +0.004 over H3 on ts_C0.1 (criterion 0.005 narrowly missed); adopted as C3"}
+  - {id: H9, statement: "Better classical expert", status: partly-supported, note: "bands/windows don't help; regularisation C=0.1 (calibration) does; ts_C0.1 selected"}
+  - {id: H10, statement: "Gain robust to EEGNet training seed", status: active, note: "protocol 04"}
 
 experiments:
   proxy_metric: "Dev bank (experts on R1-R2 -> R3), true ID, out-of-fold balanced accuracy (LOPO for global, within-person 2-fold x5 for per-person); NLL secondary"
   baseline_value: "dev R3: EEGNet alone 0.887 / NLL 0.312"
-  best_value: "dev R3: H2 0.891; test R4-R6 (checkpoint 1): H3 0.921 / NLL 0.214"
-  total_runs: 13
+  best_value: "xfit dev: C3 (H8 ts_C0.1) 0.883 / NLL 0.278; test R4-R6 (checkpoint 2): C3 0.921 / 0.209 (R0 0.908 / 0.235)"
+  total_runs: 45
   trajectory: []
 
 jobs:
   - {name: bank_dev_seed0, status: done, finished: "2026-09-30 12:20"}
   - {name: bank_test_packaged, status: done}
-  - {name: bank_dev_hold0_seed0, started: "2026-09-30 15:35", log: outputs/t2-expert-weights/bank_dev_hold0_seed0.log}
-  - {name: bank_dev_hold1_seed0, started: "2026-09-30 15:35", log: outputs/t2-expert-weights/bank_dev_hold1_seed0.log}
-next: "when both folds finish: python research/src/bank.py xfit; run research/experiments/02-xfit-bank/code/run.py; commit results; analysis; checkpoint 2 protocol" 
+  - {name: bank_xfit_seed0, status: done}
+  - {name: bank_test_seed1, started: "2026-09-30 20:35", log: outputs/t2-expert-weights/bank_test_seed1.log}
+  - {name: bank_test_seed2, started: "2026-09-30 20:35", log: outputs/t2-expert-weights/bank_test_seed2.log}
+next: "when seed 1/2 test banks finish: run research/experiments/04-seed-robustness/code/run.py; analysis; progress report; then integration plan"
 
 outer_loop:
-  cycle: 1
+  cycle: 2
   last_direction: deepen
-  last_reflection: "Dev (R3, 840 windows) and test disagree on the sign of the ts effect; dev bank below resolution. Build cross-fitted dev bank (protocol 02)." 
+  previous: "cycle 1: deepen evaluation (xfit bank)"
+  last_reflection: "Adopted C3 at checkpoint 2. Remaining risk: one EEGNet seed. Protocol 04 tests seeds 1-2 before integration."
 
 confirmation:
   reference_R4R6: {eegnet_soft: 0.901, eegnet_oracle: 0.908, eegnet_ts_avg_soft: 0.909}
   checkpoints:
+    - {id: checkpoint-2, candidates: [C1, C2, C3, C4], oracle: {R0: 0.908, R1: 0.921, C1: 0.922, C2: 0.920, C3: 0.921, C4: 0.920}, adopted: C3}
     - {id: checkpoint-1, candidates: [R0, R1, H5a, H3], oracle: {R0: 0.908, R1: 0.921, H5a: 0.917, H3: 0.921}, nll: {R0: 0.235, R1: 0.325, H3: 0.214}}

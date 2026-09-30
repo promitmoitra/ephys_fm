@@ -22,3 +22,14 @@
   best NLL (0.214) vs R0 0.908. Dev and test disagree in sign → dev bank too small.
 - **Outer loop 1: DEEPEN the evaluation.** Protocol 02: cross-fitted dev bank (each calibration
   run held out; 2,520 windows). 15:35 launched folds R1, R2 (2 threads each).
+- 16:54 cross-fit folds done. [Session paused on usage limit until 20:30.]
+- 20:31 xfit bank merged (2,520 windows). Protocol 02: plain average −0.008 pooled (per fold
+  −0.015 / +0.010 / −0.018); log-linear +0.002, NLL 0.303 → 0.287; per-person linear +0.007.
+  Bootstrap CIs ±0.011: nothing resolved in accuracy; the NLL gain is consistent.
+- Protocol 03: bands/windows don't make a better classical expert; C = 0.1 calibrates ts and
+  flips the plain average to +0.007. Reliability predicts held-out ts accuracy (r ≈ 0.99);
+  H8 has the best NLL (0.269) and, on ts_C0.1, the best accuracy (0.883).
+- Checkpoint 2 (C1–C4, adoption rule fixed in advance): all beat EEGNet alone on R4–R6 by
+  +0.012–0.014 (CI > 0 for log-linear), NLL 0.209–0.213 vs 0.235. **Adopted C3.**
+- **Outer loop 2: DEEPEN (robustness).** Protocol 04: seeds 1, 2 of the test-time EEGNet
+  experts; 20:35 launched.

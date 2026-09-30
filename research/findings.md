@@ -2,39 +2,65 @@
 
 ## Current understanding
 
-- **ts can add to EEGNet, but the evidence is noisy.** On the hidden runs R4–R6 (seed 0),
-  combining each person's EEGNet expert with their Riemannian tangent-space (ts) expert lifts
-  oracle-ID accuracy from 0.908 to 0.921. That holds for both the plain average and a
-  log-linear stack. On the R3 dev bank (experts trained on R1–R2), the plain average instead
-  *hurt* (0.887 → 0.869). With 40 windows per person, the dev bank cannot resolve effects
-  of ±0.015, so a cross-fitted dev bank (all three calibration runs held out in turn) is
-  being built.
-- **Why a plain average is the wrong rule:** ts is over-confident (mean confidence 0.754 at
-  0.681 accuracy), while the fine-tuned EEGNet is calibrated (0.883 / 0.887). A linear
-  average lets chance-level but confident ts votes overrule EEGNet, and it wrecks NLL
-  (0.325 vs 0.235 on R4–R6). Log-linear pooling with a bias (weights ≈ 0.83 EEGNet, 0.40 ts)
-  keeps the accuracy gain and gives the best NLL of any rule (0.214).
-- **ts is strongly person-specific:** R3 accuracy ≥ 0.92 for 6 people and ≈ chance for 9.
-  Its value therefore probably lies in a per-person reliability weight, not a global one.
-- **Routing is no longer the bottleneck:** loop A's filter-bank covariance fingerprint
-  (0.996 on R4–R6) brings the soft mixture to the oracle ceiling, so oracle-ID expert
-  quality is what loop B should improve.
+**Adding each person's Riemannian tangent-space (ts) expert to their EEGNet expert helps,
+if the ts expert is prevented from being over-confident.** On the hidden runs R4–R6
+(seed 0, oracle ID), every log-linear combination fitted on calibration data beats EEGNet
+alone by +0.012 to +0.014 (0.908 → 0.920–0.922; person-bootstrap 95% CI excludes zero), and
+lowers NLL from 0.235 to 0.209–0.213. Soft-routed with loop A's filter-bank fingerprint, the
+recommended combiner reaches **0.921** (EEGNet alone 0.907).
+
+**Recommended combiner (C3):** reliability-weighted log-linear pooling,
+log p ∝ 0.81·log p_eeg + (0.96 + 1.70·(rel_k − 0.5))·log p_ts + b, with a regularised ts
+expert (8–30 Hz, 0.5–4 s, OAS → tangent space → logistic regression, C = 0.1) and rel_k =
+person k's run-to-run ts accuracy on calibration data. **C1** (fixed log-linear weights
+0.83 / 0.42 on the original ts) is statistically equivalent and simpler.
+
+**Why a plain average was the wrong rule, and why it sometimes looked fine.** The original ts
+expert is over-confident (mean confidence 0.755 at 0.680 accuracy). The fine-tuned EEGNet
+expert is calibrated (0.883 / 0.887). A linear average therefore lets confident but
+chance-level ts votes overrule EEGNet for people whose motor imagery ts cannot decode. Its
+effect swings with how strong EEGNet happens to be on a run: −0.018 to +0.010 across the
+three dev folds, +0.014 on R4–R6. Log-space pooling, regularising ts (C = 0.1 makes it
+slightly under-confident), or weighting it by reliability all remove that failure mode.
+
+**ts's usefulness is a stable person trait.** A person's ts accuracy from one calibration run
+to another predicts their held-out ts accuracy almost perfectly across people (r = 0.94–0.99).
+ts is near-perfect for ~6 of 21 people and at chance for ~9. Reliability weighting uses this
+directly: learned ts weight ≈ 0.1 at chance-level reliability, ≈ 1.0 at 0.9.
+
+## Key results
+
+| Rule | Dev: cross-fitted R1–R3 (2,520 windows) | Test: R4–R6 (2,520) |
+|---|---|---|
+| EEGNet only | 0.875 / NLL 0.303 | 0.908 / 0.235 |
+| Plain average EEGNet + ts | 0.867 / 0.371 | 0.921 / 0.325 |
+| C1 log-linear (ts) | 0.877 / 0.287 | 0.922 / 0.212 |
+| C3 reliability-weighted (ts_C0.1) | 0.883 / 0.278 | 0.921 / 0.209 |
 
 ## Patterns and insights
 
-- Confidence gating cannot help: where EEGNet is unsure, ts is even less accurate
-  (0.61 vs 0.69 on R3).
-- CSP adds nothing (learned weight ≈ 0.04; including it in a plain average costs 0.12 on dev).
+- Resolution matters more than combiner choice: a 40-window-per-person dev set (R3 only) gave
+  the wrong sign for the ts effect. Even 2,520 cross-fitted windows give ±0.011 CIs, and all
+  sensible combiners sit inside that band. The consistent signal across every split is the
+  **NLL** improvement of log-space pooling.
+- Confidence gating cannot help: where EEGNet is unsure, ts is even less accurate.
+- CSP adds nothing (learned weight ≈ 0.02–0.04); filter banks, other windows and low
+  frequencies do not make a better classical expert. Regularisation (calibration) is what
+  matters.
+- Routing is solved by loop A: with its fingerprint, soft-routed = oracle within 0.001.
 
 ## Lessons and constraints
 
-- R4–R6 are never used for decisions; confirm only pre-registered candidates.
+- R4–R6 are never used for decisions. Confirm only pre-registered candidates; fix the adoption
+  rule before the test run (checkpoint 2 did).
+- Don't rank combiners on a 40-window-per-person dev set. Use the cross-fitted bank
+  (`bank_xfit_seed0.npz`).
 - Dev experts are trained on 2 calibration runs, test experts on 3.
-- A 40-window-per-person dev set gives a paired SE of ≈ 0.01 on rule differences, which is
-  too coarse to rank combiners whose differences are 0.01–0.02.
+- `cmd && ps ... && launch` fails silently when `ps` finds nothing (exit 1). Launch separately.
 
 ## Open questions
 
-- Is the dev/test disagreement noise, an R3-specific effect, or ts gaining more than EEGNet
-  from a third training run? (Protocol 02 per-fold results.)
-- Per-person reliability weights (H8) and a stronger classical expert (H9, filter-bank ts).
+- Seed robustness: is the gain present for other EEGNet training seeds? (Protocol 04, running.)
+- Integration: C3 needs per-person tangent-space + LR weights as torch tensors in
+  `submission.py`. Loop A's H9 export shows the pattern works.
+- Does this transfer to the sealed phase's data (cross-day, 3 classes, EOG/EMG channels)?
