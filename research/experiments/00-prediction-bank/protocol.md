@@ -19,7 +19,7 @@ R4–R6 (seed 0): EEGNet-only soft mixture **0.901**, EEGNet + ts equal average 
   epoch on R3; exploratory only).
 - **Test bank** (`bank_test_packaged.npz`): EEGNet experts and fingerprint = the packaged
   seed-0 mixture (trained on R1–R3, 8 threads), so its EEGNet-only soft mixture reproduces
-  0.901; `ts` and `csp` fitted on R1–R3. All predict **R4–R6** (5,040 windows).
+  0.901; `ts` and `csp` fitted on R1–R3. All predict **R4–R6** (2,520 windows, 120 per person).
   *Deviation from the handoff:* the test bank reuses the packaged EEGNet experts instead of
   retraining them at 4 threads, so the confirmation baseline is exactly the shipped one.
   Known mismatch: dev experts see 2 calibration runs, test experts 3, so the EEGNet expert is
