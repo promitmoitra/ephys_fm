@@ -37,36 +37,54 @@ hypotheses:
     note: "Only testable at confirmation (R3 is the dev set); test via a drift-matched proxy: R1 -> R3 vs R1-R2 -> R3"
   - id: H2
     statement: "Pretrain the trunk on 52/66 pool identities, fine-tune on the 21 -> features that generalize across runs"
-    status: pending
-    priority: high
+    status: deprioritized
+    priority: low
+    note: "EEGNet-only idea; ts_fb already at ceiling on Dreyer"
   - id: H3
     statement: "Riemannian fingerprint (tangent space + LR, broadband and filter bank) >= 0.90 within session"
-    status: active
+    status: supported
+    result: "ts_fb_C1: R3 1.000; R4-R6 0.996 (confirm-1); BNCI cross-day 0.974"
     priority: high
   - id: H4
     statement: "Temperature scaling on a held-out calibration run improves NLL at equal accuracy"
     status: pending
-    priority: high
+    priority: low
+    note: "ts_fb ECE already 0.013-0.046; revisit only for cross-day NLL"
   - id: H5
     statement: "Augmentation for run-to-run drift (channel dropout, amplitude scaling, time shift, noise)"
     status: pending
     priority: medium
+  - id: H3.1
+    statement: "Covariance fingerprints survive run distance (Dreyer) and days (BNCI)"
+    status: supported
+    result: "ts_fb R1->R3 1.000; BNCI cross-day 0.974 vs broadband 0.872"
+  - id: H3.2
+    statement: "Which bands carry stable identity (alpha predicted best cross-day)"
+    status: active
   - id: H6
-    statement: "Ensembles (EEGNet + Riemannian, product of experts)"
-    status: pending
-    priority: medium
+    statement: "EEGNet + ts_fb equal-weight ensembles (D1, D2)"
+    status: pending (waits for H3.1 EEGNet arms)
+  - id: H9
+    statement: "Pure-torch export of ts_fb_C1 reproduces sklearn"
+    status: supported
+    result: "max |dp| 3.9e-6 float32, argmax identical, 5.7 MB"
 
 experiments:
-  proxy_metric: "R3 21-way balanced accuracy and NLL (train R1-R2)"
-  baseline_value: null
-  best_value: null
-  total_runs: 0
-  trajectory: []
+  proxy_metric: "R3 21-way balanced accuracy and NLL (train R1-R2); saturated -> drift benchmarks D1 (Dreyer R1->R3) and D2 (BNCI cross-day)"
+  baseline_value: "EEGNet shipped recipe: R3 0.857 (biased, best epoch on R3); R4-R6 0.744"
+  best_value: "ts_fb_C1: R3 1.000 / NLL 0.027; R4-R6 0.996 (confirm-1); BNCI cross-day 0.974 / NLL 0.071"
+  total_runs: 30
+  trajectory:
+    - {run_id: h3_ts_broad_C1, metric: "R3 0.987 / 0.107"}
+    - {run_id: h3_ts_fb_C1, metric: "R3 1.000 / 0.027"}
+    - {run_id: h3.1_D2_ts_broad, metric: "BNCI 0.872 / 0.403"}
+    - {run_id: h3.1_D2_ts_fb, metric: "BNCI 0.974 / 0.071"}
+    - {run_id: confirm-1_ts_fb, metric: "R4-R6 0.996 / 0.044; mixture 0.907 (oracle 0.9075)"}
 
 outer_loop:
-  cycle: 0
-  last_direction: null
-  last_reflection: ""
+  cycle: 1
+  last_direction: deepen+broaden
+  last_reflection: "Dreyer routing gap closed (soft = oracle). Next: cross-day robustness (BNCI worst person 0.77), band mechanism (H3.2), shippable torch module (done, H9)."
 
 workspace:
   findings: "research/findings.md"
