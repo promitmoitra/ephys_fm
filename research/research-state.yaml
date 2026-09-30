@@ -5,7 +5,7 @@ project:
   question: >
     Which per-window person-ID model gives the most accurate and best-calibrated p(person | window)
     for the 21 Dreyer evaluation people, so that soft routing keeps more of the oracle-ID gain?
-  status: concluding
+  status: concluded
   started: "2026-09-30"
   domain: "EEG biometrics / BCI decoding (Track 2)"
   worktree: ".claude/worktrees/t2-fingerprint"

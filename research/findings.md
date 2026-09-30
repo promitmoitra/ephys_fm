@@ -67,8 +67,8 @@ identity task, while second-order statistics with a linear classifier do not.
 | Dreyer R1–R2 → R3 (locked dev) | 0.618 / 2.256 (seed 0) | 0.987 / 0.107 | **1.000 / 0.027** | 1.000 / 0.026 |
 | Dreyer R1 → R3 | (running) | 0.976 / 0.188 | 1.000 / 0.052 | 1.000 / 0.051 |
 | BNCI day 1 → day 2 | (running) | 0.872 / 0.403 | 0.974 / 0.071 | **0.992 / 0.035** |
-| **Dreyer R4–R6 (confirm-1)** | 0.744 (shipped, epoch on R3) | 0.990 / 0.080 | **0.996 / 0.044** | – |
-| Soft mixture on R4–R6 | 0.901 (shipped) | 0.908 | **0.907** (oracle 0.9075) | – |
+| **Dreyer R4–R6 (confirm-1)** | 0.800 ± 0.012 (refit on R1–R3; shipped 0.744) | 0.990 / 0.080 | **0.996 / 0.044** | – |
+| Soft mixture on R4–R6 | 0.899 ± 0.003 (shipped 0.901) | 0.908 | **0.907** (oracle 0.9075) | – |
 
 (balanced accuracy / NLL; 21-way on Dreyer, 9-way on BNCI)
 
