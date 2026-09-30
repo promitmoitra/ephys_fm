@@ -1,0 +1,77 @@
+# Loop A (Track 2): per-window fingerprint model. Brief: docs/handoff/track2-research-loops.md
+
+project:
+  title: "Track 2 loop A: a better per-window fingerprint for soft routing"
+  question: >
+    Which per-window person-ID model gives the most accurate and best-calibrated p(person | window)
+    for the 21 Dreyer evaluation people, so that soft routing keeps more of the oracle-ID gain?
+  status: active
+  started: "2026-09-30"
+  domain: "EEG biometrics / BCI decoding (Track 2)"
+  worktree: ".claude/worktrees/t2-fingerprint"
+  branch: "exp/fingerprint-model"
+  artifacts: "outputs/t2-fingerprint/"
+
+evaluation:
+  inner_loop: "train R1-R2 (1,680 windows), test R3 (840); 21-way balanced accuracy + NLL; fixed epoch budget, last epoch"
+  secondary: "p_true (mean mass on true person), ECE, top-3, worst-person recall"
+  confirmation: >
+    retrain on R1-R3, score R4-R6: fingerprint accuracy + soft-routed mixture with the fixed EEGNet
+    experts of outputs/track2_dreyer_sim/submission/mixture.pt (baseline 0.744 / 0.901); 3 seeds.
+    Only at outer-loop checkpoints, for pre-registered candidates. External check: BNCI cross-session.
+  never: "use R4-R6 for any decision"
+
+literature:
+  key_papers: []
+  open_problems: []
+
+hypotheses:
+  - id: H0
+    statement: "Baseline re-measurement: EEGNet, 150 epochs fixed, last epoch"
+    status: active
+    priority: high
+  - id: H1
+    statement: "Train on all of R1-R3 with a fixed budget (50% more data per person) -> better hidden-run fingerprint"
+    status: pending
+    priority: medium
+    note: "Only testable at confirmation (R3 is the dev set); test via a drift-matched proxy: R1 -> R3 vs R1-R2 -> R3"
+  - id: H2
+    statement: "Pretrain the trunk on 52/66 pool identities, fine-tune on the 21 -> features that generalize across runs"
+    status: pending
+    priority: high
+  - id: H3
+    statement: "Riemannian fingerprint (tangent space + LR, broadband and filter bank) >= 0.90 within session"
+    status: active
+    priority: high
+  - id: H4
+    statement: "Temperature scaling on a held-out calibration run improves NLL at equal accuracy"
+    status: pending
+    priority: high
+  - id: H5
+    statement: "Augmentation for run-to-run drift (channel dropout, amplitude scaling, time shift, noise)"
+    status: pending
+    priority: medium
+  - id: H6
+    statement: "Ensembles (EEGNet + Riemannian, product of experts)"
+    status: pending
+    priority: medium
+
+experiments:
+  proxy_metric: "R3 21-way balanced accuracy and NLL (train R1-R2)"
+  baseline_value: null
+  best_value: null
+  total_runs: 0
+  trajectory: []
+
+outer_loop:
+  cycle: 0
+  last_direction: null
+  last_reflection: ""
+
+workspace:
+  findings: "research/findings.md"
+  log: "research/research-log.md"
+  literature_dir: "research/literature/"
+  experiments_dir: "research/experiments/"
+  to_human_dir: "research/to_human/"
+  shared_code: "research/src/ (fp.py harness, riemann.py)"
