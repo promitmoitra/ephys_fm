@@ -97,15 +97,22 @@ def expert_logp(models, X):
 
 
 def build_dev(args):
+    """Dev bank for one held-out calibration run r (default R3): experts trained on the
+    other two calibration runs predict run r. r = 2 is the original dev bank."""
+    r = args.holdout
+    tag = "" if r == 2 else f"_hold{r}"
     d = load_windows()
-    X, y, subj, split = d["X"], d["y"], d["subject"], d["split"]
-    people, calib, target = setting(d, 2)
+    X, y, subj, run, split = d["X"], d["y"], d["subject"], d["run"], d["split"]
+    people, _, _ = setting(d, 2)
+    is_eval = split == "test"
+    calib = is_eval & (run < 3) & (run != r)
+    target = is_eval & (run == r)
     n_chans, n_times = X.shape[1:]
     C = int(y.max()) + 1
-    log(f"dev bank: {len(people)} people, calib {calib.sum()} windows (R1-R2), "
-        f"target {target.sum()} windows (R3)")
+    log(f"dev bank, held-out run R{r + 1}: {len(people)} people, calib {calib.sum()} "
+        f"windows, target {target.sum()} windows")
 
-    pooled_path = OUT / f"pooled_dev_seed{args.seed}.pt"
+    pooled_path = OUT / f"pooled_dev{tag}_seed{args.seed}.pt"
     pool = (split == "train") | calib
     val = split == "val"
     if pooled_path.exists():
@@ -127,7 +134,7 @@ def build_dev(args):
             "true_idx": np.array([people.index(s) for s in subj[target]])}
     bank["pooled"] = log_softmax_np(logits(pooled, Xt).numpy())
 
-    log("control fine-tune (all 21 people's R1-R2)")
+    log("control fine-tune (all 21 people's calibration runs)")
     control, _ = fit(copy.deepcopy(pooled), X[calib], y[calib], lr=1e-4,
                      epochs=args.ft_epochs, seed=args.seed, bs=32)
     bank["control"] = log_softmax_np(logits(control, Xt).numpy())
@@ -138,21 +145,39 @@ def build_dev(args):
         e, _ = fit(copy.deepcopy(pooled), X[m], y[m], lr=1e-4, epochs=args.ft_epochs,
                    seed=args.seed, bs=32)
         experts.append(e)
-        log(f"  expert {s} done")
+    log(f"  {len(experts)} experts done")
     torch.save({"experts": [e.state_dict() for e in experts],
                 "control": control.state_dict()},
-               OUT / f"experts_dev_seed{args.seed}.pt")
+               OUT / f"experts_dev{tag}_seed{args.seed}.pt")
     bank["eegnet"] = expert_logp(experts, Xt)
 
     log("classical experts")
     bank.update(classical_logp(d, people, calib, target))
 
-    log("packaged fingerprint on R3 (biased: its epoch was picked on R3)")
-    bank["fp_biased"] = fingerprint_logp(d, people, Xt)
+    if r == 2:
+        log("packaged fingerprint on R3 (biased: its epoch was picked on R3)")
+        bank["fp_biased"] = fingerprint_logp(d, people, Xt)
 
-    path = OUT / f"bank_dev_seed{args.seed}.npz"
+    path = OUT / f"bank_dev{tag}_seed{args.seed}.npz"
     np.savez(path, **bank, pooled_info=json.dumps(info))
     log(f"saved {path}")
+    summarize(bank)
+
+
+def build_xfit(args):
+    """Concatenate the three held-out-run dev banks into one cross-fitted bank."""
+    parts = []
+    for r in range(3):
+        tag = "" if r == 2 else f"_hold{r}"
+        d = np.load(OUT / f"bank_dev{tag}_seed{args.seed}.npz", allow_pickle=True)
+        parts.append({k: d[k] for k in ("y", "subject", "true_idx", "pooled", "control",
+                                        "eegnet", "csp", "ts")} | {"people": d["people"]})
+    bank = {k: np.concatenate([p[k] for p in parts]) for k in parts[0] if k != "people"}
+    bank["people"] = parts[0]["people"]
+    bank["fold"] = np.concatenate([np.full(len(p["y"]), r) for r, p in enumerate(parts)])
+    path = OUT / f"bank_xfit_seed{args.seed}.npz"
+    np.savez(path, **bank)
+    log(f"saved {path} ({len(bank['y'])} windows)")
     summarize(bank)
 
 
@@ -202,7 +227,8 @@ def summarize(bank):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("bank", choices=["dev", "test"])
+    ap.add_argument("bank", choices=["dev", "test", "xfit"])
+    ap.add_argument("--holdout", type=int, default=2, help="dev: held-out calib run (0-2)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--ft-epochs", type=int, default=50)
@@ -215,7 +241,7 @@ def main():
         OUT = OUT / "smoke"
         args.epochs = args.ft_epochs = 1
     OUT.mkdir(parents=True, exist_ok=True)
-    (build_dev if args.bank == "dev" else build_test)(args)
+    {"dev": build_dev, "test": build_test, "xfit": build_xfit}[args.bank](args)
 
 
 if __name__ == "__main__":
