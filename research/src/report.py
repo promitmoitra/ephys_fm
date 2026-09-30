@@ -138,6 +138,68 @@ def band_table():
             "<th>BNCI cross-day</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>")
 
 
+def heldout_table():
+    arms = ["fb6", "fine18", "fine11_8_30"]
+    rows = []
+    for ds in ("BNCI2015_001", "Zhou2016"):
+        cells = []
+        for a in arms:
+            m = res("h3.3-bank-design", f"heldout_{ds}_{a}")
+            cells.append(f"<td>{m['bal_acc']:.3f} <span class='muted'>/ {m['nll']:.3f}</span></td>"
+                         if m else "<td class='muted'>–</td>")
+        rows.append(f"<tr><th scope='row'>{ds}</th>{''.join(cells)}</tr>")
+    return ("<table><thead><tr><th>Held-out dataset (day 1 → later days)</th>"
+            + "".join(f"<th>{a}</th>" for a in arms) + "</tr></thead><tbody>"
+            + "".join(rows) + "</tbody></table>")
+
+
+def multiday_table():
+    arms = ["S1", "S2", "S1+S2", "S1+S2_halfmatched"]
+    labels = ["day 1", "day 2", "days 1 + 2", "days 1 + 2, data-matched"]
+    rows = []
+    for ds in ("BNCI2015_001", "Zhou2016"):
+        cells = []
+        for a in arms:
+            m = res("h11-multiday-calibration", f"{ds}_fb6_{a}")
+            cells.append(f"<td>{m['bal_acc']:.3f} <span class='muted'>/ {m['nll']:.3f}</span></td>"
+                         if m else "<td class='muted'>–</td>")
+        rows.append(f"<tr><th scope='row'>{ds} → day 3</th>{''.join(cells)}</tr>")
+    return ("<table><thead><tr><th>Trained on</th>" + "".join(f"<th>{l}</th>" for l in labels)
+            + "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>")
+
+
+def channel_plot():
+    p = EXPS / "h12-channel-count" / "results" / "curves.json"
+    if not p.exists():
+        return "<p class='muted'>Running.</p>"
+    cur = json.loads(p.read_text())
+    W, H, left, right, top, bottom = 720, 300, 56, 200, 16, 40
+    x = lambda k: left + (k - 4) / (28 - 4) * (W - left - right)
+    y = lambda v: top + (1.0 - v) / (1.0 - 0.8) * (H - top - bottom)
+    out = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Fingerprint accuracy vs channels" class="chart">']
+    for v in (0.8, 0.85, 0.9, 0.95, 1.0):
+        out.append(f'<line x1="{left}" x2="{W - right}" y1="{y(v):.1f}" y2="{y(v):.1f}" class="grid"/>'
+                   f'<text x="{left - 8}" y="{y(v) + 4:.1f}" class="tick" text-anchor="end">{v:.2f}</text>')
+    for k in (6, 9, 13, 17, 20, 22, 27):
+        out.append(f'<text x="{x(k):.1f}" y="{H - 18}" class="tick" text-anchor="middle">{k}</text>')
+    out.append(f'<text x="{(left + W - right) / 2:.0f}" y="{H - 2}" class="tick" text-anchor="middle">channels (random subsets)</text>')
+    for s, (key, lab) in enumerate((("D2_bnci_s1tos2", "BNCI day 1 → 2 (9 people)"),
+                                    ("D1_R1toR3", "Dreyer R1 → R3 (21 people)"))):
+        pts = sorted((int(k), v["bal_acc"][0], v["bal_acc"][1]) for k, v in cur.get(key, {}).items())
+        if not pts:
+            continue
+        cls = f"s{s + 1}"
+        path = " ".join(f"{'M' if i == 0 else 'L'}{x(k):.1f},{y(max(m, 0.8)):.1f}" for i, (k, m, _) in enumerate(pts))
+        out.append(f'<path d="{path}" class="line {cls}"/>')
+        for k, m, sd in pts:
+            out.append(f'<circle cx="{x(k):.1f}" cy="{y(max(m, 0.8)):.1f}" r="4.5" class="dot {cls}">'
+                       f'<title>{html.escape(lab)}, {k} channels: {m:.3f} ± {sd:.3f}</title></circle>')
+        k, m, _ = pts[-1]
+        out.append(f'<text x="{x(k) + 10:.1f}" y="{y(max(m, 0.8)) + 4 + s * 14:.1f}" class="rowlab">{html.escape(lab)}</text>')
+    out.append("</svg>")
+    return "\n".join(out)
+
+
 CSS = """
 :root{--surface:#fcfcfb;--text:#0b0b0b;--text2:#52514e;--muted:#8a8984;--grid:#e6e5e0;
 --s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--card:#ffffff;--border:#e6e5e0}
@@ -153,7 +215,7 @@ p,li{color:var(--text2)} .muted{color:var(--muted);font-size:13px}
 .chart{width:100%;height:auto}.grid{stroke:var(--grid);stroke-width:1}
 .tick{fill:var(--muted);font-size:11px}.rowlab{fill:var(--text2);font-size:12px}
 .dot{stroke:var(--card);stroke-width:2}.s1{fill:var(--s1);stroke:var(--s1)}.s2{fill:var(--s2);stroke:var(--s2)}
-.s3{fill:var(--s3);stroke:var(--s3)}.dot.s1,.dot.s2,.dot.s3{stroke:var(--card)}.err{stroke-width:2;opacity:.5}
+.s3{fill:var(--s3);stroke:var(--s3)}.line{fill:none;stroke-width:2}.line.s1{stroke:var(--s1)}.line.s2{stroke:var(--s2)}.dot.s1,.dot.s2,.dot.s3{stroke:var(--card)}.err{stroke-width:2;opacity:.5}
 .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--text2);margin:4px 0 8px}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
 table{border-collapse:collapse;width:100%;font-size:13.5px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top}
@@ -178,6 +240,13 @@ def main(n, narrative):
 <p class="muted">Dots: mean over seeds (EEGNet) or the deterministic value (Riemann); bars: ±1 SD over 3 seeds.
 Chance: 1/21 = 0.048 (Dreyer), 1/9 = 0.111 (BNCI).</p></div>
 <div class="card">{table(rows)}</div>
+<h2>Across days: the risk for the sealed phase</h2>
+<p class="muted">Held-out cross-day datasets (H3.3): the finer banks chosen on BNCI2014 do not generalize.</p>
+<div class="card">{heldout_table()}</div>
+<p class="muted">Multi-day calibration (H11), fb6, balanced accuracy / NLL on day 3.</p>
+<div class="card">{multiday_table()}</div>
+<p class="muted">Channel count (H12): fb6 balanced accuracy, mean ± SD over 10 random channel subsets.</p>
+<div class="card">{channel_plot()}</div>
 <h2>Band ablation (H3.2): balanced accuracy / NLL</h2>
 <div class="card">{band_table()}</div>
 <h2>Confirmation on the hidden runs R4–R6 (pre-registered, confirm-1)</h2>

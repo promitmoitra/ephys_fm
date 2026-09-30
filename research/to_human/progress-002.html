@@ -1,0 +1,113 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Fingerprint loop progress</title>
+<style>
+:root{--surface:#fcfcfb;--text:#0b0b0b;--text2:#52514e;--muted:#8a8984;--grid:#e6e5e0;
+--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--card:#ffffff;--border:#e6e5e0}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--surface:#1a1a19;--text:#fff;
+--text2:#c3c2b7;--muted:#8f8e86;--grid:#33332f;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--card:#222220;--border:#33332f}}
+:root[data-theme="dark"]{--surface:#1a1a19;--text:#fff;--text2:#c3c2b7;--muted:#8f8e86;--grid:#33332f;
+--s1:#3987e5;--s2:#d95926;--s3:#199e70;--card:#222220;--border:#33332f}
+body{background:var(--surface);color:var(--text);font:15px/1.55 system-ui,sans-serif;margin:0}
+main{max-width:860px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:19px;margin:36px 0 8px}
+p,li{color:var(--text2)} .muted{color:var(--muted);font-size:13px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin:12px 0;overflow-x:auto}
+.chart{width:100%;height:auto}.grid{stroke:var(--grid);stroke-width:1}
+.tick{fill:var(--muted);font-size:11px}.rowlab{fill:var(--text2);font-size:12px}
+.dot{stroke:var(--card);stroke-width:2}.s1{fill:var(--s1);stroke:var(--s1)}.s2{fill:var(--s2);stroke:var(--s2)}
+.s3{fill:var(--s3);stroke:var(--s3)}.line{fill:none;stroke-width:2}.line.s1{stroke:var(--s1)}.line.s2{stroke:var(--s2)}.dot.s1,.dot.s2,.dot.s3{stroke:var(--card)}.err{stroke-width:2;opacity:.5}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--text2);margin:4px 0 8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+table{border-collapse:collapse;width:100%;font-size:13.5px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+thead th{color:var(--muted);font-weight:600}.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.kpi b{display:block;font-size:26px;color:var(--text)}.kpi span{color:var(--muted);font-size:13px}
+</style></head><body><main>
+<h1>Track 2 loop A: fingerprint model</h1>
+<p class="muted">Progress report 002 · branch exp/fingerprint-model · dev decisions on R3 and drift proxies only</p>
+<div class="kpis">
+<div class="card kpi"><b>0.996</b><span>fingerprint on hidden R4–R6 (shipped EEGNet: 0.744)</span></div>
+<div class="card kpi"><b>0.907</b><span>soft mixture on R4–R6 = oracle ID 0.9075 (shipped 0.901)</span></div>
+<div class="card kpi"><b>0.935 → 1.000</b><span>cross-day ID when calibrating on 2 days instead of 1 (BNCI2015_001)</span></div>
+</div>
+<h2>Since report 001</h2>
+<p><b>Across days, calibration diversity is the lever.</b> On two held-out cross-day datasets, a fingerprint trained on one day is fragile (BNCI2015_001 0.923, Zhou2016 0.807; a few people carry the errors). Trained on two days and tested on a third, it reaches 1.000 and 0.975. A data-matched control (half of each day) does almost as well, so it is day diversity, not data amount. The sealed phase gives each evaluation person several calibration sessions: <b>fit the fingerprint on all of them pooled.</b></p>
+<p><b>Pre-registration paid off.</b> Finer filter banks won on BNCI2014 (0.994) but lost on both held-out datasets, so the 6-band bank stays. EEGNet + Riemann ensembles were below Riemann alone everywhere.</p>
+<p><b>Channel count is not the story across days</b> (BNCI: 9 channels 0.967 vs 22 channels 0.974), but it matters for many-way ID with little data (Dreyer 21 people from one run: 6 channels 0.869 → 27 channels 1.000). The sealed phase (10 people, 43 EEG channels) is comfortable.</p>
+<h2>Recommendation for Track 2</h2>
+<ul><li>Replace the EEGNet fingerprint with the 6-band covariance fingerprint (<code>research/src/torch_fp.py</code>: pure torch, ~5.7 MB, matches sklearn to 4e-6), fitted on all calibration sessions pooled; keep soft routing.</li>
+<li>Untested for the sealed data: whether its EOG/EMG channels should be excluded from the fingerprint (the mechanism says day-specific low-frequency content hurts across days; start with EEG channels only).</li></ul>
+
+<h2>Person-ID balanced accuracy on the dev benchmarks</h2>
+<div class="card"><div class="legend"><span><i style='background:var(--s1)'></i>EEGNet (shipped recipe, last epoch)</span><span><i style='background:var(--s2)'></i>Riemann, broadband</span><span><i style='background:var(--s3)'></i>Riemann, 6-band filter bank</span></div>
+<svg viewBox="0 0 720 236" role="img" aria-label="Balanced accuracy by benchmark and model" class="chart">
+<line x1="290.0" x2="290.0" y1="22" y2="210" class="grid"/><text x="290.0" y="226" class="tick" text-anchor="middle">0.50</text>
+<line x1="370.0" x2="370.0" y1="22" y2="210" class="grid"/><text x="370.0" y="226" class="tick" text-anchor="middle">0.60</text>
+<line x1="450.0" x2="450.0" y1="22" y2="210" class="grid"/><text x="450.0" y="226" class="tick" text-anchor="middle">0.70</text>
+<line x1="530.0" x2="530.0" y1="22" y2="210" class="grid"/><text x="530.0" y="226" class="tick" text-anchor="middle">0.80</text>
+<line x1="610.0" x2="610.0" y1="22" y2="210" class="grid"/><text x="610.0" y="226" class="tick" text-anchor="middle">0.90</text>
+<line x1="690.0" x2="690.0" y1="22" y2="210" class="grid"/><text x="690.0" y="226" class="tick" text-anchor="middle">1.00</text>
+<text x="278" y="56.0" class="rowlab" text-anchor="end">Dreyer R1–R2 → R3 (locked inner loop)</text>
+<line x1="406.4" x2="564.8" y1="43.0" y2="43.0" class="err s1"/>
+<circle cx="485.6" cy="43.0" r="5" class="dot s1"><title>EEGNet (shipped recipe, last epoch) · Dreyer R1–R2 → R3 (locked inner loop): bal_acc 0.744 ± 0.099 (n=3)</title></circle>
+<circle cx="679.5" cy="52.0" r="5" class="dot s2"><title>Riemann, broadband · Dreyer R1–R2 → R3 (locked inner loop): bal_acc 0.987</title></circle>
+<circle cx="690.0" cy="61.0" r="5" class="dot s3"><title>Riemann, 6-band filter bank · Dreyer R1–R2 → R3 (locked inner loop): bal_acc 1.000</title></circle>
+<text x="278" y="100.0" class="rowlab" text-anchor="end">Dreyer R1 → R2 (one training run)</text>
+<line x1="331.5" x2="432.0" y1="87.0" y2="87.0" class="err s1"/>
+<circle cx="381.7" cy="87.0" r="5" class="dot s1"><title>EEGNet (shipped recipe, last epoch) · Dreyer R1 → R2 (one training run): bal_acc 0.615 ± 0.063 (n=3)</title></circle>
+<circle cx="663.3" cy="96.0" r="5" class="dot s2"><title>Riemann, broadband · Dreyer R1 → R2 (one training run): bal_acc 0.967</title></circle>
+<circle cx="687.1" cy="105.0" r="5" class="dot s3"><title>Riemann, 6-band filter bank · Dreyer R1 → R2 (one training run): bal_acc 0.996</title></circle>
+<text x="278" y="144.0" class="rowlab" text-anchor="end">Dreyer R1 → R3 (two runs later)</text>
+<line x1="290.0" x2="353.9" y1="131.0" y2="131.0" class="err s1"/>
+<circle cx="291.6" cy="131.0" r="5" class="dot s1"><title>EEGNet (shipped recipe, last epoch) · Dreyer R1 → R3 (two runs later): bal_acc 0.502 ± 0.078 (n=3)</title></circle>
+<circle cx="671.0" cy="140.0" r="5" class="dot s2"><title>Riemann, broadband · Dreyer R1 → R3 (two runs later): bal_acc 0.976</title></circle>
+<circle cx="690.0" cy="149.0" r="5" class="dot s3"><title>Riemann, 6-band filter bank · Dreyer R1 → R3 (two runs later): bal_acc 1.000</title></circle>
+<text x="278" y="188.0" class="rowlab" text-anchor="end">BNCI day 1 → day 2 (cross-day, 9 people)</text>
+<line x1="600.3" x2="639.2" y1="175.0" y2="175.0" class="err s1"/>
+<circle cx="619.7" cy="175.0" r="5" class="dot s1"><title>EEGNet (shipped recipe, last epoch) · BNCI day 1 → day 2 (cross-day, 9 people): bal_acc 0.912 ± 0.024 (n=3)</title></circle>
+<circle cx="587.2" cy="184.0" r="5" class="dot s2"><title>Riemann, broadband · BNCI day 1 → day 2 (cross-day, 9 people): bal_acc 0.872</title></circle>
+<circle cx="669.3" cy="193.0" r="5" class="dot s3"><title>Riemann, 6-band filter bank · BNCI day 1 → day 2 (cross-day, 9 people): bal_acc 0.974</title></circle>
+</svg>
+<p class="muted">Dots: mean over seeds (EEGNet) or the deterministic value (Riemann); bars: ±1 SD over 3 seeds.
+Chance: 1/21 = 0.048 (Dreyer), 1/9 = 0.111 (BNCI).</p></div>
+<div class="card"><table><thead><tr><th>Benchmark</th><th>EEGNet (shipped recipe, last epoch)</th><th>Riemann, broadband</th><th>Riemann, 6-band filter bank</th></tr></thead><tbody><tr><th scope='row'>Dreyer R1–R2 → R3 (locked inner loop)</th><td>0.744 ± 0.099<br><span class='muted'>NLL 1.343</span></td><td>0.987<br><span class='muted'>NLL 0.107</span></td><td>1.000<br><span class='muted'>NLL 0.027</span></td></tr><tr><th scope='row'>Dreyer R1 → R2 (one training run)</th><td>0.615 ± 0.063<br><span class='muted'>NLL 1.743</span></td><td>0.967<br><span class='muted'>NLL 0.153</span></td><td>0.996<br><span class='muted'>NLL 0.065</span></td></tr><tr><th scope='row'>Dreyer R1 → R3 (two runs later)</th><td>0.502 ± 0.078<br><span class='muted'>NLL 2.267</span></td><td>0.976<br><span class='muted'>NLL 0.188</span></td><td>1.000<br><span class='muted'>NLL 0.052</span></td></tr><tr><th scope='row'>BNCI day 1 → day 2 (cross-day, 9 people)</th><td>0.912 ± 0.024<br><span class='muted'>NLL 0.417</span></td><td>0.872<br><span class='muted'>NLL 0.403</span></td><td>0.974<br><span class='muted'>NLL 0.071</span></td></tr></tbody></table></div>
+<h2>Across days: the risk for the sealed phase</h2>
+<p class="muted">Held-out cross-day datasets (H3.3): the finer banks chosen on BNCI2014 do not generalize.</p>
+<div class="card"><table><thead><tr><th>Held-out dataset (day 1 → later days)</th><th>fb6</th><th>fine18</th><th>fine11_8_30</th></tr></thead><tbody><tr><th scope='row'>BNCI2015_001</th><td>0.923 <span class='muted'>/ 0.314</span></td><td>0.922 <span class='muted'>/ 0.288</span></td><td>0.899 <span class='muted'>/ 0.343</span></td></tr><tr><th scope='row'>Zhou2016</th><td>0.807 <span class='muted'>/ 0.524</span></td><td>0.732 <span class='muted'>/ 0.693</span></td><td>0.710 <span class='muted'>/ 0.588</span></td></tr></tbody></table></div>
+<p class="muted">Multi-day calibration (H11), fb6, balanced accuracy / NLL on day 3.</p>
+<div class="card"><table><thead><tr><th>Trained on</th><th>day 1</th><th>day 2</th><th>days 1 + 2</th><th>days 1 + 2, data-matched</th></tr></thead><tbody><tr><th scope='row'>BNCI2015_001 → day 3</th><td>0.935 <span class='muted'>/ 0.300</span></td><td>0.806 <span class='muted'>/ 0.495</span></td><td>1.000 <span class='muted'>/ 0.038</span></td><td>0.998 <span class='muted'>/ 0.044</span></td></tr><tr><th scope='row'>Zhou2016 → day 3</th><td>0.790 <span class='muted'>/ 0.421</span></td><td>0.872 <span class='muted'>/ 0.316</span></td><td>0.975 <span class='muted'>/ 0.114</span></td><td>0.967 <span class='muted'>/ 0.133</span></td></tr></tbody></table></div>
+<p class="muted">Channel count (H12): fb6 balanced accuracy, mean ± SD over 10 random channel subsets.</p>
+<div class="card"><svg viewBox="0 0 720 300" role="img" aria-label="Fingerprint accuracy vs channels" class="chart">
+<line x1="56" x2="520" y1="260.0" y2="260.0" class="grid"/><text x="48" y="264.0" class="tick" text-anchor="end">0.80</text>
+<line x1="56" x2="520" y1="199.0" y2="199.0" class="grid"/><text x="48" y="203.0" class="tick" text-anchor="end">0.85</text>
+<line x1="56" x2="520" y1="138.0" y2="138.0" class="grid"/><text x="48" y="142.0" class="tick" text-anchor="end">0.90</text>
+<line x1="56" x2="520" y1="77.0" y2="77.0" class="grid"/><text x="48" y="81.0" class="tick" text-anchor="end">0.95</text>
+<line x1="56" x2="520" y1="16.0" y2="16.0" class="grid"/><text x="48" y="20.0" class="tick" text-anchor="end">1.00</text>
+<text x="94.7" y="282" class="tick" text-anchor="middle">6</text>
+<text x="152.7" y="282" class="tick" text-anchor="middle">9</text>
+<text x="230.0" y="282" class="tick" text-anchor="middle">13</text>
+<text x="307.3" y="282" class="tick" text-anchor="middle">17</text>
+<text x="365.3" y="282" class="tick" text-anchor="middle">20</text>
+<text x="404.0" y="282" class="tick" text-anchor="middle">22</text>
+<text x="500.7" y="282" class="tick" text-anchor="middle">27</text>
+<text x="288" y="298" class="tick" text-anchor="middle">channels (random subsets)</text>
+<path d="M94.7,86.1 L152.7,55.7 L230.0,51.5 L307.3,55.4 L404.0,47.5" class="line s1"/>
+<circle cx="94.7" cy="86.1" r="4.5" class="dot s1"><title>BNCI day 1 → 2 (9 people), 6 channels: 0.943 ± 0.046</title></circle>
+<circle cx="152.7" cy="55.7" r="4.5" class="dot s1"><title>BNCI day 1 → 2 (9 people), 9 channels: 0.967 ± 0.018</title></circle>
+<circle cx="230.0" cy="51.5" r="4.5" class="dot s1"><title>BNCI day 1 → 2 (9 people), 13 channels: 0.971 ± 0.014</title></circle>
+<circle cx="307.3" cy="55.4" r="4.5" class="dot s1"><title>BNCI day 1 → 2 (9 people), 17 channels: 0.968 ± 0.013</title></circle>
+<circle cx="404.0" cy="47.5" r="4.5" class="dot s1"><title>BNCI day 1 → 2 (9 people), 22 channels: 0.974 ± 0.000</title></circle>
+<text x="414.0" y="51.5" class="rowlab">BNCI day 1 → 2 (9 people)</text>
+<path d="M94.7,175.9 L152.7,115.8 L230.0,67.4 L365.3,27.5 L500.7,16.0" class="line s2"/>
+<circle cx="94.7" cy="175.9" r="4.5" class="dot s2"><title>Dreyer R1 → R3 (21 people), 6 channels: 0.869 ± 0.055</title></circle>
+<circle cx="152.7" cy="115.8" r="4.5" class="dot s2"><title>Dreyer R1 → R3 (21 people), 9 channels: 0.918 ± 0.029</title></circle>
+<circle cx="230.0" cy="67.4" r="4.5" class="dot s2"><title>Dreyer R1 → R3 (21 people), 13 channels: 0.958 ± 0.033</title></circle>
+<circle cx="365.3" cy="27.5" r="4.5" class="dot s2"><title>Dreyer R1 → R3 (21 people), 20 channels: 0.991 ± 0.010</title></circle>
+<circle cx="500.7" cy="16.0" r="4.5" class="dot s2"><title>Dreyer R1 → R3 (21 people), 27 channels: 1.000 ± 0.000</title></circle>
+<text x="510.7" y="34.0" class="rowlab">Dreyer R1 → R3 (21 people)</text>
+</svg></div>
+<h2>Band ablation (H3.2): balanced accuracy / NLL</h2>
+<div class="card"><table><thead><tr><th>Bands</th><th>R1–R2 → R3</th><th>R1 → R3</th><th>BNCI cross-day</th></tr></thead><tbody><tr><th scope='row'>single_1-4</th><td>0.989 <span class='muted'>/ 0.109</span></td><td>0.968 <span class='muted'>/ 0.220</span></td><td>0.710 <span class='muted'>/ 0.947</span></td></tr><tr><th scope='row'>single_4-8</th><td>0.996 <span class='muted'>/ 0.078</span></td><td>0.993 <span class='muted'>/ 0.141</span></td><td>0.894 <span class='muted'>/ 0.371</span></td></tr><tr><th scope='row'>single_8-13</th><td>0.999 <span class='muted'>/ 0.046</span></td><td>1.000 <span class='muted'>/ 0.095</span></td><td>0.975 <span class='muted'>/ 0.101</span></td></tr><tr><th scope='row'>single_13-20</th><td>0.998 <span class='muted'>/ 0.051</span></td><td>1.000 <span class='muted'>/ 0.086</span></td><td>0.931 <span class='muted'>/ 0.241</span></td></tr><tr><th scope='row'>single_20-30</th><td>1.000 <span class='muted'>/ 0.034</span></td><td>1.000 <span class='muted'>/ 0.066</span></td><td>0.945 <span class='muted'>/ 0.161</span></td></tr><tr><th scope='row'>single_30-45</th><td>0.987 <span class='muted'>/ 0.062</span></td><td>0.993 <span class='muted'>/ 0.105</span></td><td>0.930 <span class='muted'>/ 0.207</span></td></tr><tr><th scope='row'>drop_1-4</th><td>1.000 <span class='muted'>/ 0.027</span></td><td>1.000 <span class='muted'>/ 0.049</span></td><td>0.981 <span class='muted'>/ 0.055</span></td></tr><tr><th scope='row'>drop_4-8</th><td>1.000 <span class='muted'>/ 0.028</span></td><td>1.000 <span class='muted'>/ 0.053</span></td><td>0.982 <span class='muted'>/ 0.058</span></td></tr><tr><th scope='row'>drop_8-13</th><td>1.000 <span class='muted'>/ 0.031</span></td><td>1.000 <span class='muted'>/ 0.057</span></td><td>0.958 <span class='muted'>/ 0.123</span></td></tr><tr><th scope='row'>drop_13-20</th><td>1.000 <span class='muted'>/ 0.029</span></td><td>1.000 <span class='muted'>/ 0.057</span></td><td>0.969 <span class='muted'>/ 0.085</span></td></tr><tr><th scope='row'>drop_20-30</th><td>1.000 <span class='muted'>/ 0.032</span></td><td>1.000 <span class='muted'>/ 0.062</span></td><td>0.968 <span class='muted'>/ 0.082</span></td></tr><tr><th scope='row'>drop_30-45</th><td>1.000 <span class='muted'>/ 0.028</span></td><td>1.000 <span class='muted'>/ 0.055</span></td><td>0.967 <span class='muted'>/ 0.082</span></td></tr><tr><th scope='row'>fb_plus_broad</th><td>1.000 <span class='muted'>/ 0.026</span></td><td>1.000 <span class='muted'>/ 0.050</span></td><td>0.963 <span class='muted'>/ 0.094</span></td></tr><tr><th scope='row'>fine18</th><td>1.000 <span class='muted'>/ 0.026</span></td><td>1.000 <span class='muted'>/ 0.051</span></td><td>0.992 <span class='muted'>/ 0.035</span></td></tr></tbody></table></div>
+<h2>Confirmation on the hidden runs R4–R6 (pre-registered, confirm-1)</h2>
+<p class="muted">Soft mixture uses the fixed EEGNet experts of the shipped seed-0 mixture. Shipped: fingerprint 0.744, soft 0.901, oracle 0.908.</p>
+<div class="card"><table><thead><tr><th>Fingerprint</th><th>21-way bal. acc</th><th>NLL</th><th>Mixture, soft</th><th>hard</th><th>oracle ID</th></tr></thead><tbody><tr><th scope='row'>ts_fb_C1_seed0</th><td>0.996</td><td>0.044</td><td>0.907</td><td>0.907</td><td>0.908</td></tr><tr><th scope='row'>ts_broad_C1_seed0</th><td>0.990</td><td>0.080</td><td>0.908</td><td>0.908</td><td>0.908</td></tr></tbody></table></div>
+</main></body></html>
