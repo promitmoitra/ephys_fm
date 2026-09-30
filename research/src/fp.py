@@ -68,6 +68,17 @@ def load_pool(splits=("train", "val")):
             "people": people}
 
 
+def load_bnci():
+    """BNCI2014_001 (9 people x 2 days), the kit's preprocessing at 120 Hz, 22 ch x 480."""
+    d = np.load(REPO_DATA / "experiments" / "tangermann_windows.npz", allow_pickle=True)
+    subj = d["subject"]
+    people = sorted(np.unique(subj))
+    idx = {s: i for i, s in enumerate(people)}
+    return {"X": d["X"].astype(np.float32), "y": d["task"],
+            "person": np.array([idx[s] for s in subj]), "session": d["session"],
+            "run": d["run"], "people": people}
+
+
 # --------------------------------------------------------------------------
 # Metrics: soft routing uses the probabilities, so score them, not just argmax
 # --------------------------------------------------------------------------
