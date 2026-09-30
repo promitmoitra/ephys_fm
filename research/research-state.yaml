@@ -15,29 +15,36 @@ literature:
   open_problems: []
 
 hypotheses:
-  - {id: H1, statement: "One global EEGNet/ts weight chosen by log-loss beats the equal average", status: pending, priority: high}
-  - {id: H2, statement: "Per-person weights (noisy, 40 windows)", status: pending, priority: medium}
-  - {id: H3, statement: "Stacking: logistic regression on experts' log-probabilities", status: pending, priority: high}
-  - {id: H4, statement: "Log-linear pooling beats linear pooling", status: pending, priority: high}
-  - {id: H5, statement: "Per-expert temperature scaling before pooling", status: pending, priority: high}
-  - {id: H6, statement: "Confidence gating per window (margin / entropy)", status: pending, priority: medium}
-  - {id: H7, statement: "CSP with a learned (small) weight", status: pending, priority: low}
+  - {id: H1, statement: "One global EEGNet/ts weight chosen by log-loss beats the equal average", status: inconclusive, note: "dev: w_eeg 0.915, = EEGNet alone; dev too small (P01)"}
+  - {id: H2, statement: "Per-person weights", status: inconclusive, note: "dev 0.891 +-0.002 (best, within noise); re-test on xfit bank"}
+  - {id: H3, statement: "Stacking: log-linear + bias on log-probs", status: front-runner, note: "dev 0.882/NLL 0.300; R4-R6 0.921/NLL 0.214 (R0 0.908/0.235) at checkpoint 1"}
+  - {id: H4, statement: "Log-linear pooling beats linear pooling", status: inconclusive}
+  - {id: H5, statement: "Per-expert temperature before pooling", status: refuted-as-predicted, note: "EEGNet is calibrated (T<1 learned); ts is the over-confident expert"}
+  - {id: H6, statement: "Confidence gating per window", status: refuted, note: "where EEGNet is unsure, ts is even worse (0.61 vs 0.69)"}
+  - {id: H7, statement: "CSP with a learned weight", status: supported, note: "weight ~0.04; CSP adds nothing"}
+  - {id: H8, statement: "Per-person reliability weights for ts (CAWPE-style; ts is near-perfect for ~6 people, chance for ~9)", status: pending, priority: high}
+  - {id: H9, statement: "Better classical expert (filter-bank tangent space) makes combination pay", status: pending, priority: high}
 
 experiments:
   proxy_metric: "Dev bank (experts on R1-R2 -> R3), true ID, out-of-fold balanced accuracy (LOPO for global, within-person 2-fold x5 for per-person); NLL secondary"
-  baseline_value: null
-  best_value: null
-  total_runs: 0
+  baseline_value: "dev R3: EEGNet alone 0.887 / NLL 0.312"
+  best_value: "dev R3: H2 0.891; test R4-R6 (checkpoint 1): H3 0.921 / NLL 0.214"
+  total_runs: 13
   trajectory: []
 
 jobs:
-  - {name: bank_dev_seed0, started: "2026-09-30 11:23", log: outputs/t2-expert-weights/bank_dev_seed0.log}
+  - {name: bank_dev_seed0, status: done, finished: "2026-09-30 12:20"}
+  - {name: bank_test_packaged, status: done}
+  - {name: bank_dev_hold0_seed0, started: "2026-09-30 15:35", log: outputs/t2-expert-weights/bank_dev_hold0_seed0.log}
+  - {name: bank_dev_hold1_seed0, started: "2026-09-30 15:35", log: outputs/t2-expert-weights/bank_dev_hold1_seed0.log}
+next: "when both folds finish: python research/src/bank.py xfit; run research/experiments/02-xfit-bank/code/run.py; commit results; analysis; checkpoint 2 protocol" 
 
 outer_loop:
-  cycle: 0
-  last_direction: null
-  last_reflection: ""
+  cycle: 1
+  last_direction: deepen
+  last_reflection: "Dev (R3, 840 windows) and test disagree on the sign of the ts effect; dev bank below resolution. Build cross-fitted dev bank (protocol 02)." 
 
 confirmation:
   reference_R4R6: {eegnet_soft: 0.901, eegnet_oracle: 0.908, eegnet_ts_avg_soft: 0.909}
-  checkpoints: []
+  checkpoints:
+    - {id: checkpoint-1, candidates: [R0, R1, H5a, H3], oracle: {R0: 0.908, R1: 0.921, H5a: 0.917, H3: 0.921}, nll: {R0: 0.235, R1: 0.325, H3: 0.214}}

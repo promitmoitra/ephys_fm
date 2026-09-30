@@ -265,3 +265,17 @@ def soft_route(bank, comb, experts, fp_key):
     logp_k = comb.predict(Fall)                                   # (n, K, C)
     p = (np.exp(bank[fp_key])[:, :, None] * np.exp(logp_k)).sum(1)
     return np.log(np.clip(p, EPS, 1))
+
+
+def eval_person_loro(bank, make, experts):
+    """Per-person combiners on the cross-fitted bank: leave-one-run(fold)-out within person."""
+    y, t, fold = bank["y"], bank["true_idx"], bank["fold"]
+    K = len(bank["people"])
+    F = own(bank, experts)
+    oof = np.zeros((len(y), F[experts[0]].shape[-1]))
+    for k in range(K):
+        for f in np.unique(fold):
+            tr, te = (t == k) & (fold != f), (t == k) & (fold == f)
+            c = make(experts).fit({e: v[tr] for e, v in F.items()}, y[tr])
+            oof[te] = c.predict({e: v[te] for e, v in F.items()})
+    return _summary(y, t, oof, K) | {"oof": oof}
