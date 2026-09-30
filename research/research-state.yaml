@@ -1,0 +1,43 @@
+project:
+  title: "Track 2 loop B: learned expert weights"
+  question: >
+    Which combination rule for each person's EEGNet expert and classical (Riemannian ts, CSP)
+    experts, learned on calibration data only, gives the best soft-routed mixture on the
+    Dreyer sealed-phase simulation's hidden runs?
+  status: active
+  started: "2026-09-30"
+  domain: "EEG motor-imagery decoding, ensembling / stacking"
+  worktree: .claude/worktrees/t2-expert-weights
+  branch: exp/expert-weights
+
+literature:
+  key_papers: []
+  open_problems: []
+
+hypotheses:
+  - {id: H1, statement: "One global EEGNet/ts weight chosen by log-loss beats the equal average", status: pending, priority: high}
+  - {id: H2, statement: "Per-person weights (noisy, 40 windows)", status: pending, priority: medium}
+  - {id: H3, statement: "Stacking: logistic regression on experts' log-probabilities", status: pending, priority: high}
+  - {id: H4, statement: "Log-linear pooling beats linear pooling", status: pending, priority: high}
+  - {id: H5, statement: "Per-expert temperature scaling before pooling", status: pending, priority: high}
+  - {id: H6, statement: "Confidence gating per window (margin / entropy)", status: pending, priority: medium}
+  - {id: H7, statement: "CSP with a learned (small) weight", status: pending, priority: low}
+
+experiments:
+  proxy_metric: "Dev bank (experts on R1-R2 -> R3), true ID, out-of-fold balanced accuracy (LOPO for global, within-person 2-fold x5 for per-person); NLL secondary"
+  baseline_value: null
+  best_value: null
+  total_runs: 0
+  trajectory: []
+
+jobs:
+  - {name: bank_dev_seed0, started: "2026-09-30 11:23", log: outputs/t2-expert-weights/bank_dev_seed0.log}
+
+outer_loop:
+  cycle: 0
+  last_direction: null
+  last_reflection: ""
+
+confirmation:
+  reference_R4R6: {eegnet_soft: 0.901, eegnet_oracle: 0.908, eegnet_ts_avg_soft: 0.909}
+  checkpoints: []
