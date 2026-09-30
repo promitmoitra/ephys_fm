@@ -14,12 +14,55 @@ as labeled calibration. The submission therefore ships:
 On BNCI2014_001 this beat an epoch-matched pooled control by +0.034 ± 0.007
 (5/5 seeds) without IDs; see `experiments/fingerprint_tangermann/`.
 
+## Current best model
+
+1. **Input**: the kit's windows as-is (0–4 s from the cue, per-recording
+   robust scaling). No extra preprocessing: baseline correction and
+   asymmetry features did not help (`experiments/dreyer_eog/`).
+2. **Pooled EEGNet** on all labeled data (training people + evaluation
+   people's calibration sessions); AdamW lr 1e-3, epoch picked on held-out
+   people.
+3. **Per-person experts**: whole-network fine-tune of the pooled model per
+   evaluation person on their calibration data; lr 1e-4, 50 epochs, **last
+   epoch** (no epoch selection).
+4. **Fingerprint EEGNet** recognises the person from one window.
+5. **Soft routing** in `predict(X)`.
+6. *Optional:* average each person's expert with a per-person Riemannian
+   model (OAS covariance → tangent space → logistic regression, 8–30 Hz,
+   0.5–4 s). +0.008 on one seed (`classical_experts.py`); not established.
+
+| Evidence | Result |
+|---|---|
+| BNCI, 5 seeds, cross-session | mixture +0.034 ± 0.007 over the epoch-matched control, 5/5 seeds (oracle ID +0.045) |
+| Dreyer simulation, seed 0 | pooled 0.873 → control 0.890 → **mixture 0.901** (oracle 0.908); + Riemannian 0.909 |
+| Contract | passes the kit's benchopt run, read-only; 5,040 windows in 57 s on CPU; ZIP 0.22 MB |
+
+**Tried and dropped**: per-person heads trained from scratch (−0.030 vs
+pooled even with oracle ID, 0/5 seeds); BatchNorm-statistics-only adaptation
+(±0.000); epoch selection on small validation sets; hard routing (≤ soft);
+CSP experts or equal averaging of all expert types in the mixture (−0.004,
+−0.068); explicit hemispheric-asymmetry features (≈ per-channel band power);
+per-trial pre-cue baseline correction (−0.03 within-subject).
+
+**What it uses on Dreyer** (`experiments/dreyer_confound/`,
+`experiments/dreyer_eog/`): mostly an early cue-locked brain response
+(~250 ms), plus sustained eye position and some wrist EMG. Genuine motor
+imagery is present but transfers poorly across people, which is where
+per-person calibration helps.
+
+**Next, in priority order**: more seeds for the Dreyer mixture (+0.011 over
+the control is within noise); a better fingerprint (it bounds the gain);
+learned expert weights on a held-out calibration run instead of plain
+averaging; then re-validate everything on the 2026 Graz + BrainHero data
+(47 channels incl. EOG/EMG, 3 classes) once released.
+
 ## Files
 
 | File | Role |
 |---|---|
 | `submission.py` | the uploaded code: `Solver(CompetSolver)` + `FingerprintMixture`; maps evaluation channels to training channels **by name** and fails loudly on missing channels, `n_times` or `n_classes` mismatches |
 | `train_mixture.py` | trains pooled, fingerprint and experts on Dreyer 2023, packages `outputs/track2_dreyer_sim/track2_dreyer_sim.zip` (`submission.py`, `mixture.pt`, `config.json` at the ZIP root), and scores the shipped code path |
+| `classical_experts.py` | per-person CSP + LDA and Riemannian experts, alone and averaged with the packaged EEGNet experts, oracle / soft / hard routing (evaluation only; not yet in `submission.py`) |
 | `results/` | per-seed results |
 
 ```bash
