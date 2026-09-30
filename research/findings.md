@@ -28,6 +28,25 @@ days. Splitting into bands lets the classifier weight the stable bands: 6 bands 
 with individual spectral peaks (e.g. the individual alpha frequency) being part of the
 signature. H3.3 separates the "no delta" effect from the "finer resolution" effect.
 
+**Across days, calibration diversity matters more than the model details (H11).** On two
+held-out cross-day datasets, a fingerprint trained on one day is fragile. BNCI2015_001 (12
+people, 13 channels) scores 0.923, and Zhou2016 (4 people, 14 channels) 0.807, with a few
+people carrying most of the errors. Training on **two** days and testing on a third lifts it
+to 1.000 (BNCI2015_001) and 0.975 (Zhou2016). A data-matched control with half of each day,
+the same total as one day, does almost as well (0.998, 0.967). So the gain comes from seeing
+within-person, between-day variation, not from more data. The linear classifier learns to
+down-weight the day-specific directions. The sealed phase gives each evaluation person
+several labeled calibration sessions, which is the favourable regime: **fit the fingerprint
+on all calibration sessions pooled.**
+
+**Filter-bank details beyond the 6 bands do not generalize (H3.3).** Finer banks (18 × 2 Hz,
+11 × 2 Hz over 8–30 Hz) won on BNCI2014 cross-day but lost on both held-out datasets
+(Zhou2016: `fb6` 0.807 vs 0.732 / 0.710). The locked selection rule plus the held-out check
+kept us from shipping an overfit choice. `fb6` stays.
+
+**EEGNet adds nothing on top (H6).** Equal-weight EEGNet + `ts_fb` ensembles were below
+`ts_fb` alone everywhere.
+
 **The EEGNet fingerprint was weaker than it looked.** Under the locked protocol (fixed 150
 epochs, last epoch, no selection on R3), EEGNet reached 0.618 on R3 with NLL 2.26 and ECE 0.24
 (seed 0). Its R3 accuracy swung between 0.59 and 0.72 from epoch 50 to 100. The shipped 0.857
@@ -45,6 +64,13 @@ identity task, while second-order statistics with a linear classifier do not.
 | Soft mixture on R4–R6 | 0.901 (shipped) | 0.908 | **0.907** (oracle 0.9075) | – |
 
 (balanced accuracy / NLL; 21-way on Dreyer, 9-way on BNCI)
+
+Cross-day, `fb6` (balanced accuracy / NLL):
+
+| Dataset (test day) | Trained on day 1 | day 2 | days 1 + 2 | days 1 + 2, data-matched |
+|---|---|---|---|---|
+| BNCI2015_001, day 3 (4 people, 12-way) | 0.935 / 0.300 | 0.806 / 0.495 | **1.000 / 0.038** | 0.998 / 0.044 |
+| Zhou2016, day 3 (4-way) | 0.790 / 0.421 | 0.872 / 0.316 | **0.975 / 0.114** | 0.967 / 0.133 |
 
 - **H9, shippable:** each band's zero-phase filter on a fixed window is an exact linear operator,
   i.e. one T × T matrix. OAS, tangent space (eigh) and the folded scaler + LR run in torch. The
@@ -76,8 +102,11 @@ identity task, while second-order statistics with a linear classifier do not.
 
 ## Open Questions
 
-- Does the finer bank's cross-day gain hold on other datasets (H3.3 held-out: BNCI2015_001,
-  Zhou2016)?
+- H12 (running): does channel count explain the weaker held-out cross-day numbers?
+  (BNCI2014 at 6 channels still scores 0.943 ± 0.046, so probably only partly.)
+- If a person had only one calibration day, could other people's day-to-day variation
+  (estimated from people with several days) be projected out of the tangent space?
+  (Not needed if the sealed phase gives 3 days per person.)
 - The sealed phase has 47 channels (incl. 2 EOG, 2 EMG), probably 3 calibration days, and
   10 people. Should EOG/EMG channels be excluded from the fingerprint (they carry day-specific
   artifacts)? Does training on several calibration days make the fingerprint more robust?
