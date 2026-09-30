@@ -4,10 +4,12 @@
 
 **Adding each person's Riemannian tangent-space (ts) expert to their EEGNet expert helps,
 if the ts expert is prevented from being over-confident.** On the hidden runs R4–R6
-(seed 0, oracle ID), every log-linear combination fitted on calibration data beats EEGNet
-alone by +0.012 to +0.014 (0.908 → 0.920–0.922; person-bootstrap 95% CI excludes zero), and
-lowers NLL from 0.235 to 0.209–0.213. Soft-routed with loop A's filter-bank fingerprint, the
-recommended combiner reaches **0.921** (EEGNet alone 0.907).
+(oracle ID), the recommended combiner, fitted on calibration data only, lifts the EEGNet
+experts from 0.898 to **0.917** averaged over 3 training seeds (+0.014 / +0.020 / +0.024;
+every person-bootstrap 95% CI excludes zero). It also lowers NLL from 0.253 to 0.215.
+Soft-routed with loop A's filter-bank fingerprint (seed 0), it reaches 0.921 (EEGNet alone
+0.907). With Dreyer's coefficients unchanged, it also lifts BNCI 2014-001 (4-class, across
+a day gap) by +0.052 (5/5 seeds).
 
 **Recommended combiner (C3):** reliability-weighted log-linear pooling,
 log p ∝ 0.81·log p_eeg + (0.96 + 1.70·(rel_k − 0.5))·log p_ts + b, with a regularised ts
@@ -36,6 +38,14 @@ directly: learned ts weight ≈ 0.1 at chance-level reliability, ≈ 1.0 at 0.9.
 | Plain average EEGNet + ts | 0.867 / 0.371 | 0.921 / 0.325 |
 | C1 log-linear (ts) | 0.877 / 0.287 | 0.922 / 0.212 |
 | C3 reliability-weighted (ts_C0.1) | 0.883 / 0.278 | 0.921 / 0.209 |
+| C3, mean of seeds 0–2 (vs EEGNet 0.898 / 0.253) | — | **0.917 / 0.215** |
+| BNCI, Dreyer coefficients unchanged, 5 seeds (EEGNet 0.745) | — | C1 0.799, C3 0.797 |
+
+**The best weights depend on the regime.** Within a session (Dreyer), EEGNet is calibrated
+and ts over-confident, so ts gets a small weight (0.42 vs 0.83). Across a day gap (BNCI), the
+EEGNet expert becomes over-confident (0.79 confidence at 0.745 accuracy) and the best weights
+reverse (≈ 0.67 EEGNet / 0.83 ts, exploratory). Transferred Dreyer weights still capture ~77%
+of BNCI's best gain. For the cross-day sealed phase, refit on a leave-one-session-out bank.
 
 ## Patterns and insights
 
@@ -58,9 +68,11 @@ directly: learned ts weight ≈ 0.1 at chance-level reliability, ≈ 1.0 at 0.9.
 - Dev experts are trained on 2 calibration runs, test experts on 3.
 - `cmd && ps ... && launch` fails silently when `ps` finds nothing (exit 1). Launch separately.
 
-## Open questions
+## Open questions (handed to integration / the sealed phase)
 
-- Seed robustness: is the gain present for other EEGNet training seeds? (Protocol 04, running.)
-- Integration: C3 needs per-person tangent-space + LR weights as torch tensors in
-  `submission.py`. Loop A's H9 export shows the pattern works.
-- Does this transfer to the sealed phase's data (cross-day, 3 classes, EOG/EMG channels)?
+- Integration into `submission.py` together with loop A's fingerprint. The torch modules
+  exist (`research/src/torch_experts.py`), verified to |Δp| 2e-8; run the ts path in float64.
+- The sealed phase's data (cross-day, 3 classes, EOG/EMG channels): refit the combiner on a
+  leave-one-calibration-session-out bank; the BNCI result says the weights shift across days.
+- Whether a stronger cross-day classical expert (e.g. with Riemannian re-centring per
+  session) adds more on the sealed data.

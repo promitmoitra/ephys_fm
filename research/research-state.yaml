@@ -4,7 +4,7 @@ project:
     Which combination rule for each person's EEGNet expert and classical (Riemannian ts, CSP)
     experts, learned on calibration data only, gives the best soft-routed mixture on the
     Dreyer sealed-phase simulation's hidden runs?
-  status: active
+  status: concluded
   started: "2026-09-30"
   domain: "EEG motor-imagery decoding, ensembling / stacking"
   worktree: .claude/worktrees/t2-expert-weights
@@ -24,8 +24,8 @@ hypotheses:
   - {id: H7, statement: "CSP with a learned weight", status: supported, note: "weight ~0.04; CSP adds nothing"}
   - {id: H8, statement: "Per-person reliability weights for ts", status: supported, note: "rel predicts held-out ts acc r=0.94-0.99; best dev NLL; +0.004 over H3 on ts_C0.1 (criterion 0.005 narrowly missed); adopted as C3"}
   - {id: H9, statement: "Better classical expert", status: partly-supported, note: "bands/windows don't help; regularisation C=0.1 (calibration) does; ts_C0.1 selected"}
-  - {id: H10, statement: "Gain robust to EEGNet training seed", status: active, note: "protocol 04"}
-  - {id: H11, statement: "Dreyer-fitted coefficients transfer zero-shot to BNCI 2014-001", status: active, note: "protocol 06"}
+  - {id: H10, statement: "Gain robust to EEGNet training seed", status: supported, note: "C3 +0.014/+0.020/+0.024 over seeds 0-2, all CIs > 0"}
+  - {id: H11, statement: "Dreyer-fitted coefficients transfer zero-shot to BNCI 2014-001", status: supported, note: "+0.052-0.054, 5/5; BNCI-optimal weights differ (EEGNet over-confident across days)"}
 
 experiments:
   proxy_metric: "Dev bank (experts on R1-R2 -> R3), true ID, out-of-fold balanced accuracy (LOPO for global, within-person 2-fold x5 for per-person); NLL secondary"
@@ -41,13 +41,13 @@ jobs:
   - {name: bank_test_seed1, started: "2026-09-30 20:35", log: outputs/t2-expert-weights/bank_test_seed1.log}
   - {name: bank_test_seed2, started: "2026-09-30 20:35", log: outputs/t2-expert-weights/bank_test_seed2.log}
   - {name: bnci_experts, started: "2026-09-30 20:57", log: outputs/t2-expert-weights/bnci/experts.log}
-next: "when seed 1/2 test banks finish: run research/experiments/04-seed-robustness/code/run.py; analysis; progress report; then integration plan"
+next: "concluded: README updates + PR; integration with loop A's fingerprint is the next (joint) step"
 
 outer_loop:
-  cycle: 2
-  last_direction: deepen
+  cycle: 3
+  last_direction: conclude
   previous: "cycle 1: deepen evaluation (xfit bank)"
-  last_reflection: "Adopted C3 at checkpoint 2. Remaining risk: one EEGNet seed. Protocol 04 tests seeds 1-2 before integration."
+  last_reflection: "C3 robust over 3 seeds (+0.019) and transfers to BNCI (+0.052). Conclude; hand off integration and sealed-phase refit."
 
 confirmation:
   reference_R4R6: {eegnet_soft: 0.901, eegnet_oracle: 0.908, eegnet_ts_avg_soft: 0.909}

@@ -38,3 +38,13 @@
 - 20:55 Protocol 06 locked: zero-shot transfer of the Dreyer coefficients to BNCI 2014-001
   (4-class, cross-session, 5 seeds). Classical stage done: ts 0.665, ts_C0.1 0.654 on
   session 2; reliability spread 0.31–0.77 (4-class scale). EEGNet stage running.
+- 20:35–01:30 Seeds 1, 2 test banks; BNCI experts, 5 seeds. [Session paused on usage limit.]
+
+## 2026-10-01
+
+- Protocol 04: C3 − EEGNet = +0.014 / +0.020 / +0.024 (seeds 0 / 1 / 2), all CIs > 0; mean
+  0.898 → 0.917. Protocol 06: Dreyer coefficients on BNCI +0.052 (C3) / +0.054 (C1), 5/5 seeds;
+  plain average +0.062; BNCI-fitted (exploratory) +0.070. Across days the EEGNet expert is
+  over-confident, so the best weights reverse.
+- **Outer loop 3: CONCLUDE.** Updated `track2/README.md` (step 6, evidence, next steps) and the
+  README experiments table; final report 002; PR.

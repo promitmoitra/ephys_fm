@@ -27,21 +27,32 @@ On BNCI2014_001 this beat an epoch-matched pooled control by +0.034 ± 0.007
    epoch** (no epoch selection).
 4. **Fingerprint EEGNet** recognises the person from one window.
 5. **Soft routing** in `predict(X)`.
-6. *Optional:* average each person's expert with a per-person Riemannian
-   model (OAS covariance → tangent space → logistic regression, 8–30 Hz,
-   0.5–4 s). +0.008 on one seed (`classical_experts.py`); not established.
+6. **Per-person Riemannian expert, combined in log space** (loop B,
+   `research/findings.md`): OAS covariance → tangent space → logistic
+   regression (8–30 Hz, 0.5–4 s, **C = 0.1**) fitted on each person's
+   calibration data. Per person k, before routing:
+   log p ∝ 0.81·log p_EEGNet + (0.96 + 1.70·(rel_k − 0.5))·log p_Riemann,
+   where rel_k is the person's run-to-run Riemannian accuracy on calibration
+   data (weight ≈ 0.1 for people whose imagery it can't decode, ≈ 1 at 0.9).
+   Not yet in `submission.py`; the torch export is verified
+   (`research/src/torch_experts.py`, |Δp| 2e-8, float64).
 
 | Evidence | Result |
 |---|---|
 | BNCI, 5 seeds, cross-session | mixture +0.034 ± 0.007 over the epoch-matched control, 5/5 seeds (oracle ID +0.045) |
-| Dreyer simulation, seed 0 | pooled 0.873 → control 0.890 → **mixture 0.901** (oracle 0.908); + Riemannian 0.909 |
+| Dreyer simulation, seed 0 | pooled 0.873 → control 0.890 → **mixture 0.901** (oracle 0.908) |
+| Dreyer, + Riemannian expert (step 6), 3 seeds, oracle ID | EEGNet experts 0.898 → **0.917** (+0.019; +0.014 / +0.020 / +0.024, every person-bootstrap CI > 0); NLL 0.253 → 0.215. Soft-routed with loop A's filter-bank fingerprint, seed 0: 0.921 |
+| BNCI, 5 seeds, Dreyer's step-6 coefficients unchanged | +0.052 ± 0.003 over the EEGNet experts (0.745 → 0.797), 5/5 seeds |
 | Contract | passes the kit's benchopt run, read-only; 5,040 windows in 57 s on CPU; ZIP 0.22 MB |
 
 **Tried and dropped**: per-person heads trained from scratch (−0.030 vs
 pooled even with oracle ID, 0/5 seeds); BatchNorm-statistics-only adaptation
 (±0.000); epoch selection on small validation sets; hard routing (≤ soft);
 CSP experts or equal averaging of all expert types in the mixture (−0.004,
-−0.068); explicit hemispheric-asymmetry features (≈ per-channel band power);
+−0.068); a *plain* average with the Riemannian expert (its sign flips
+between calibration folds, −0.018 to +0.010: the unregularised Riemannian
+expert is over-confident); confidence gating, filter-bank or broadband
+Riemannian experts; explicit hemispheric-asymmetry features (≈ per-channel band power);
 per-trial pre-cue baseline correction (−0.03 within-subject).
 
 **What it uses on Dreyer** (`experiments/dreyer_confound/`,
@@ -50,11 +61,13 @@ per-trial pre-cue baseline correction (−0.03 within-subject).
 imagery is present but transfers poorly across people, which is where
 per-person calibration helps.
 
-**Next, in priority order**: more seeds for the Dreyer mixture (+0.011 over
-the control is within noise); a better fingerprint (it bounds the gain);
-learned expert weights on a held-out calibration run instead of plain
-averaging; then re-validate everything on the 2026 Graz + BrainHero data
-(47 channels incl. EOG/EMG, 3 classes) once released.
+**Next, in priority order**: integrate loop A's fingerprint and step 6 into
+`submission.py` (all weights as tensors) and re-run the kit contract check;
+then re-validate on the 2026 Graz + BrainHero data (47 channels incl.
+EOG/EMG, 3 classes) once released. There, refit the step-6 coefficients on a
+leave-one-calibration-session-out bank: across a day gap the EEGNet expert
+becomes over-confident and the best Riemannian weight rises (BNCI prefers
+≈ 0.67 / 0.83 over Dreyer's 0.81 / 0.42).
 
 ## Files
 
