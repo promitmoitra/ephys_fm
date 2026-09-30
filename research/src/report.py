@@ -121,8 +121,11 @@ def band_table():
     if not d.exists():
         return "<p class='muted'>Running.</p>"
     benches = ["R12toR3", "D1_R1toR3", "D2_bnci_s1tos2"]
-    arms = sorted({p.stem.split("_", 1)[1] if p.stem.startswith("R12") else None
-                   for p in d.glob("R12toR3_*.json")} - {None})
+    found = {p.stem.split("_", 1)[1] for p in d.glob("R12toR3_*.json")}
+    lo = lambda a: int(a.split("_")[1].split("-")[0])
+    arms = (sorted([a for a in found if a.startswith("single_")], key=lo)
+            + sorted([a for a in found if a.startswith("drop_")], key=lo)
+            + sorted(a for a in found if not a.startswith(("single_", "drop_"))))
     rows = []
     for arm in arms:
         cells = []
