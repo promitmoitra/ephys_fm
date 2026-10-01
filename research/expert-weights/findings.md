@@ -71,7 +71,7 @@ of BNCI's best gain. For the cross-day sealed phase, refit on a leave-one-sessio
 ## Open questions (handed to integration / the sealed phase)
 
 - Integration into `submission.py` together with loop A's fingerprint. The torch modules
-  exist (`research/src/torch_experts.py`), verified to |Δp| 2e-8; run the ts path in float64.
+  exist (`research/expert-weights/src/torch_experts.py`), verified to |Δp| 2e-8; run the ts path in float64.
 - The sealed phase's data (cross-day, 3 classes, EOG/EMG channels): refit the combiner on a
   leave-one-calibration-session-out bank; the BNCI result says the weights shift across days.
 - Whether a stronger cross-day classical expert (e.g. with Riemannian re-centring per

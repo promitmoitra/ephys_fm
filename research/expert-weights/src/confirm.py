@@ -2,8 +2,8 @@
 
 Only for candidates pre-registered in a committed checkpoint protocol.
 
-    python research/src/confirm.py --checkpoint checkpoint-1 --candidates R0,R1,H5a,H3 \
-        --registry research/experiments/01-combiners/code/run.py
+    python research/expert-weights/src/confirm.py --checkpoint checkpoint-1 --candidates R0,R1,H5a,H3 \
+        --registry research/expert-weights/experiments/01-combiners/code/run.py
 """
 
 import argparse
@@ -16,7 +16,7 @@ import torch
 
 from combine import OUT, bal, load_bank, nll, own, soft_route
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 LOOP_A_FP = REPO / "outputs" / "t2-fingerprint" / "confirm-1" / "ts_fb_C1_seed0_probs.npz"
 
 
@@ -68,7 +68,7 @@ def main():
         lines.append(f"| {cid} | {r['desc']} | {cells} | {cmp_} |")
     lines.append(f"\n2,520 windows (21 people × 120). Params: "
                  + "; ".join(f"{c} `{json.dumps(r['params'])}`" for c, r in res.items()))
-    out = REPO / "research" / "experiments" / args.checkpoint / "results"
+    out = REPO / "research" / "expert-weights" / "experiments" / args.checkpoint / "results"
     out.mkdir(parents=True, exist_ok=True)
     (out / "confirm.json").write_text(json.dumps(res, indent=2))
     (out / "confirm.md").write_text("\n".join(lines) + "\n")

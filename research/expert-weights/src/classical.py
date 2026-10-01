@@ -19,7 +19,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
 SRC = Path(__file__).resolve().parent
-REPO = SRC.parents[1]
+REPO = SRC.parents[2]
 sys.path[:0] = [str(REPO / "external" / "2026-competition"), str(REPO / "track2")]
 SFREQ = 120.0
 

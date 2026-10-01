@@ -1,6 +1,6 @@
 # Experiment 05: torch export of C3 (engineering check)
 
-`research/src/torch_experts.py`: `TangentExperts` (21 per-person ts_C0.1 experts as buffers:
+`research/expert-weights/src/torch_experts.py`: `TangentExperts` (21 per-person ts_C0.1 experts as buffers:
 one shared 480 × 420 band-pass-and-crop matrix, per-person Cref^-1/2 and LR weights) and
 `C3Combiner` (4 scalars + per-person reliability). Torch only, no sklearn / pyriemann /
 scipy at inference.

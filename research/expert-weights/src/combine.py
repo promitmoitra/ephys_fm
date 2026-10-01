@@ -20,7 +20,7 @@ import torch
 from sklearn.metrics import balanced_accuracy_score
 from sklearn.model_selection import StratifiedKFold
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 OUT = REPO / "outputs" / "t2-expert-weights"
 EPS = 1e-7
 

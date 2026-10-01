@@ -1,7 +1,7 @@
 # Protocol 03: a stronger classical expert (H9) and per-person reliability weights (H8)
 
 Locked 2026-09-30 before any variant was scored. Uses the cross-fitted bank of protocol 02
-(2,520 windows; each calibration run held out in turn). Code: `research/src/classical.py`.
+(2,520 windows; each calibration run held out in turn). Code: `research/expert-weights/src/classical.py`.
 
 ## H9: classical expert variants
 

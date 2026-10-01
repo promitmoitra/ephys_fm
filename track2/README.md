@@ -28,14 +28,14 @@ On BNCI2014_001 this beat an epoch-matched pooled control by +0.034 ± 0.007
 4. **Fingerprint EEGNet** recognises the person from one window.
 5. **Soft routing** in `predict(X)`.
 6. **Per-person Riemannian expert, combined in log space** (loop B,
-   `research/findings.md`): OAS covariance → tangent space → logistic
+   `research/expert-weights/findings.md`): OAS covariance → tangent space → logistic
    regression (8–30 Hz, 0.5–4 s, **C = 0.1**) fitted on each person's
    calibration data. Per person k, before routing:
    log p ∝ 0.81·log p_EEGNet + (0.96 + 1.70·(rel_k − 0.5))·log p_Riemann,
    where rel_k is the person's run-to-run Riemannian accuracy on calibration
    data (weight ≈ 0.1 for people whose imagery it can't decode, ≈ 1 at 0.9).
    Not yet in `submission.py`; the torch export is verified
-   (`research/src/torch_experts.py`, |Δp| 2e-8, float64).
+   (`research/expert-weights/src/torch_experts.py`, |Δp| 2e-8, float64).
 
 | Evidence | Result |
 |---|---|

@@ -9,7 +9,7 @@ Given, per evaluation person, a fine-tuned EEGNet expert and per-person classica
 calibration data only, gives the best soft-routed mixture on the hidden runs? Reference on
 R4–R6 (seed 0): EEGNet-only soft mixture **0.901**, EEGNet + ts equal average **0.909**.
 
-## Banks (`research/src/bank.py`, artifacts in `outputs/t2-expert-weights/`)
+## Banks (`research/expert-weights/src/bank.py`, artifacts in `outputs/t2-expert-weights/`)
 
 - **Dev bank** (`bank_dev_seed0.npz`): pooled EEGNet on the training pool + calibration
   R1–R2 (100 epochs, epoch picked on the kit's val split, 4 threads, seed 0); control and 21

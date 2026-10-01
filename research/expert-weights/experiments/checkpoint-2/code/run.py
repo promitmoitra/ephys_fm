@@ -8,8 +8,8 @@ import numpy as np
 import torch
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[3]
-sys.path.insert(0, str(REPO / "research" / "src"))
+REPO = HERE.parents[4]
+sys.path.insert(0, str(HERE.parents[2] / "src"))
 from classical import test_fit  # noqa: E402
 from combine import (OUT, EqualLinear, LogLinearPool, RelLogLinear, Single, bal,  # noqa: E402
                      load_bank, nll, own, soft_route)

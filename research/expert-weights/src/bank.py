@@ -22,8 +22,8 @@ Every expert's output is stored as log-probabilities, shape (n_windows, K, C) fo
 per-person experts and (n_windows, C) for pooled / control.
 
 Usage (worktree root, venv active):
-    python research/src/bank.py dev --threads 4 --seed 0
-    python research/src/bank.py test
+    python research/expert-weights/src/bank.py dev --threads 4 --seed 0
+    python research/expert-weights/src/bank.py test
 """
 
 import argparse
@@ -37,7 +37,7 @@ import numpy as np
 import torch
 
 SRC = Path(__file__).resolve().parent
-REPO = SRC.parents[1]
+REPO = SRC.parents[2]
 sys.path[:0] = [str(REPO / "external" / "2026-competition"), str(REPO / "track2")]
 
 from train_mixture import fit, load_windows, logits, make_eegnet  # noqa: E402

@@ -1,4 +1,4 @@
-"""Build the loop B progress report (research/to_human/report-NNN.html) from result files."""
+"""Build the loop B progress report (research/expert-weights/to_human/report-NNN.html) from result files."""
 
 import json
 import sys
@@ -272,7 +272,7 @@ the ±0.011 CI. The consistent signal is the NLL gain of log-space pooling.</li>
 (|Δp| 2e-8 in float64; oracle 0.921 reproduced).</li>
 <li>Next (joint with loop A): integrate the filter-bank fingerprint and C3 into
 <code>submission.py</code> and re-run the kit contract check.</li></ul>
-<p class="sub">Source: <code>research/</code> in worktree <code>t2-expert-weights</code>, branch
+<p class="sub">Source: <code>research/expert-weights/</code> in worktree <code>t2-expert-weights</code>, branch
 <code>exp/expert-weights</code>. Protocols were committed before their results.</p>
 </main></body></html>"""
     out = R / "to_human" / "report-002.html"

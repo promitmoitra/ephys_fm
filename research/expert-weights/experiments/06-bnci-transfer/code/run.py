@@ -17,8 +17,8 @@ import torch
 import torch.nn.functional as F
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[3]
-sys.path[:0] = [str(REPO / "experiments" / "fingerprint_tangermann"), str(REPO / "research" / "src")]
+REPO = HERE.parents[4]
+sys.path[:0] = [str(REPO / "experiments" / "fingerprint_tangermann"), str(HERE.parents[2] / "src")]
 from classical import FBTangent, VARIANTS, _banded  # noqa: E402
 from combine import OUT as BOUT, LogLinearPool, bal, eval_global, nll  # noqa: E402
 
