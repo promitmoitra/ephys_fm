@@ -1,20 +1,32 @@
-"""Track 2 submission: fingerprint-routed mixture of per-participant EEGNets.
+"""Track 2 submission: fingerprint-routed mixture of per-participant experts.
 
-Design (validated on BNCI2014_001 in experiments/fingerprint_tangermann):
-a pooled EEGNet is fine-tuned once per evaluation participant on that
-participant's labeled calibration sessions; a fingerprint EEGNet recognises
-the participant from the window itself, since ``predict(X)`` receives no
-subject IDs. The prediction mixes the per-participant experts by the
-fingerprint's posterior:
+Design (track2/README.md, "Current best model"): a pooled EEGNet is fine-tuned
+once per evaluation participant on that participant's labeled calibration
+sessions. A per-participant Riemannian expert (tangent-space logistic
+regression) is combined with it in log space, weighted by how reliable the
+Riemannian expert was on the participant's calibration data. ``predict(X)``
+receives no subject IDs, so a fingerprint recognises the participant from the
+window itself and mixes the per-participant experts by its posterior:
 
     p(class | x) = sum_s p(subject = s | x) * p_s(class | x)
+    log p_s(c | x) ∝ a·log p_eegnet_s(c | x)
+                     + (c0 + c1·(rel_s − 0.5))·log p_riemann_s(c | x) + b_c
+
+Configurable in config.json (older packages, which lack the keys, load as
+the original design):
+    "fingerprint": "fb_riemann" (filter-bank covariance model) | "eegnet"
+    "riemann_experts": true | false (EEGNet experts only)
 
 Shipped files (read from ``meta["submission_dir"]``):
-    mixture.pt   state dicts: {"fingerprint": sd, "experts": [sd, ...]}
-    config.json  training channel names, n_times, n_classes, expert labels
+    mixture.pt   {"fingerprint": sd, "experts": [sd, ...],
+                  "riemann": sd, "combiner": sd}   (last two if enabled)
+    config.json  training channel names, n_times, n_classes, expert labels,
+                 component flags and shapes
 
 Self-contained per the contract: all inference code lives here and imports
-only the worker image's stack (torch, braindecode).
+only the worker image's stack (torch, braindecode). The covariance models
+are exact torch re-implementations of the scipy / pyriemann / sklearn
+pipelines they were fitted with (track2/riemann_parts.py).
 """
 
 import json
@@ -26,16 +38,122 @@ from braindecode.models import EEGNet
 from benchmark_utils.base_solver import CompetSolver
 
 
-class FingerprintMixture(nn.Module):
-    """Fingerprint-weighted mixture of per-participant EEGNet experts."""
+# --------------------------------------------------------------------------
+# Covariance / tangent-space building blocks
+# --------------------------------------------------------------------------
 
-    def __init__(self, n_chans, n_times, n_classes, n_experts, channel_index=None):
+def oas(X):
+    """OAS covariance of (..., C, T) windows, as sklearn.covariance.oas."""
+    Xc = X - X.mean(-1, keepdim=True)
+    n, p = X.shape[-1], X.shape[-2]
+    S = Xc @ Xc.transpose(-1, -2) / n
+    alpha = (S ** 2).mean((-1, -2))
+    mu = torch.diagonal(S, dim1=-2, dim2=-1).sum(-1) / p
+    num = alpha + mu ** 2
+    den = (n + 1) * (alpha - mu ** 2 / p)
+    shrink = torch.where(den == 0, torch.ones_like(den), torch.clamp(num / den, max=1.0))
+    eye = torch.eye(p, dtype=X.dtype, device=X.device)
+    return (1 - shrink)[..., None, None] * S + (shrink * mu)[..., None, None] * eye
+
+
+def tangent(C, cref_isqrt):
+    """pyriemann TangentSpace (metric riemann): upper triangle of
+    logm(Cref^-1/2 C Cref^-1/2), off-diagonal entries weighted by sqrt(2)."""
+    w, V = torch.linalg.eigh(cref_isqrt @ C @ cref_isqrt)
+    L = (V * torch.log(w)[..., None, :]) @ V.transpose(-1, -2)
+    p = L.shape[-1]
+    i, j = torch.triu_indices(p, p, device=L.device)
+    coef = torch.where(i == j, 1.0, 2 ** 0.5).to(L.dtype)
+    return coef * L[..., i, j]
+
+
+class FBFingerprint(nn.Module):
+    """p(subject | window) from per-band covariances (loop A).
+
+    Each band's zero-phase band-pass on the fixed-length window is one (T, T)
+    matrix; per band OAS covariance → tangent space at the calibration mean;
+    bands concatenated → standardised multinomial logistic regression, folded
+    into one linear layer."""
+
+    def __init__(self, n_bands, n_chans, n_times, n_subjects):
         super().__init__()
-        self.fingerprint = EEGNet(n_chans=n_chans, n_outputs=n_experts,
-                                  n_times=n_times)
+        n_feat = n_bands * n_chans * (n_chans + 1) // 2
+        self.register_buffer("filters", torch.zeros(n_bands, n_times, n_times))
+        self.register_buffer("cref_isqrt", torch.zeros(n_bands, n_chans, n_chans))
+        self.linear = nn.Linear(n_feat, n_subjects)
+
+    def forward(self, X):
+        """Logits (B, K)."""
+        X = X.to(self.filters.dtype)
+        f = torch.cat([tangent(oas(X @ M), W)
+                       for M, W in zip(self.filters, self.cref_isqrt)], -1)
+        return self.linear(f.to(self.linear.weight.dtype))
+
+
+class RiemannExperts(nn.Module):
+    """K per-participant tangent-space logistic regressions (loop B); float64.
+
+    Shared band-pass-and-crop matrix (T, T'), per-participant reference
+    Cref^-1/2 and class weights. forward -> log-probabilities (B, K, C)."""
+
+    def __init__(self, n_subjects, n_chans, n_times, n_times_out, n_classes):
+        super().__init__()
+        n_feat = n_chans * (n_chans + 1) // 2
+        d = torch.float64
+        self.register_buffer("filt", torch.zeros(n_times, n_times_out, dtype=d))
+        self.register_buffer("cref_isqrt", torch.zeros(n_subjects, n_chans, n_chans, dtype=d))
+        self.register_buffer("weight", torch.zeros(n_subjects, n_classes, n_feat, dtype=d))
+        self.register_buffer("bias", torch.zeros(n_subjects, n_classes, dtype=d))
+
+    def forward(self, X):
+        C = oas(X.to(self.filt.dtype) @ self.filt)                      # (B, c, c)
+        f = tangent(C[:, None], self.cref_isqrt[None])                    # (B, K, F)
+        logits = torch.einsum("bkf,kcf->bkc", f, self.weight) + self.bias
+        return torch.log_softmax(logits, -1)
+
+
+class LogLinearCombiner(nn.Module):
+    """Reliability-weighted log-linear pooling of the two experts (loop B, C3)."""
+
+    def __init__(self, n_subjects, n_classes):
+        super().__init__()
+        d = torch.float64
+        self.register_buffer("coef", torch.zeros(3, dtype=d))          # a, c0, c1
+        self.register_buffer("class_bias", torch.zeros(n_classes, dtype=d))
+        self.register_buffer("rel", torch.zeros(n_subjects, dtype=d))  # chance-normalised
+
+    def forward(self, logp_eeg, logp_riemann):
+        a, c0, c1 = self.coef
+        w = (c0 + c1 * (self.rel - 0.5))[None, :, None]
+        z = a * logp_eeg.to(w.dtype) + w * logp_riemann + self.class_bias
+        return torch.log_softmax(z, -1)
+
+
+# --------------------------------------------------------------------------
+# The mixture
+# --------------------------------------------------------------------------
+
+class FingerprintMixture(nn.Module):
+    """Fingerprint-weighted mixture of per-participant experts."""
+
+    def __init__(self, n_chans, n_times, n_classes, n_experts, channel_index=None,
+                 fingerprint="eegnet", n_bands=6, riemann_n_times_out=None):
+        super().__init__()
+        self.fingerprint_kind = fingerprint
+        if fingerprint == "eegnet":
+            self.fingerprint = EEGNet(n_chans=n_chans, n_outputs=n_experts, n_times=n_times)
+        elif fingerprint == "fb_riemann":
+            self.fingerprint = FBFingerprint(n_bands, n_chans, n_times, n_experts)
+        else:
+            raise ValueError(f"unknown fingerprint {fingerprint!r}")
         self.experts = nn.ModuleList(
             EEGNet(n_chans=n_chans, n_outputs=n_classes, n_times=n_times)
             for _ in range(n_experts))
+        self.riemann = self.combiner = None
+        if riemann_n_times_out is not None:
+            self.riemann = RiemannExperts(n_experts, n_chans, n_times,
+                                          riemann_n_times_out, n_classes)
+            self.combiner = LogLinearCombiner(n_experts, n_classes)
         # Reorders the evaluation channels into the training order.
         self.register_buffer(
             "channel_index",
@@ -43,13 +161,19 @@ class FingerprintMixture(nn.Module):
                             else range(n_chans), dtype=torch.long),
             persistent=False)
 
+    def expert_logp(self, X):
+        """Per-participant class log-probabilities (B, K, C), before routing."""
+        logp = torch.stack([torch.log_softmax(e(X), dim=1) for e in self.experts], dim=1)
+        if self.riemann is not None:
+            logp = self.combiner(logp, self.riemann(X))
+        return logp
+
     def forward(self, X):
         """Mixture class probabilities, (B, n_classes)."""
         X = X.index_select(1, self.channel_index)
         p_subject = torch.softmax(self.fingerprint(X), dim=1)            # (B, K)
-        p_class = torch.stack([torch.softmax(e(X), dim=1)
-                               for e in self.experts], dim=1)            # (B, K, C)
-        return (p_subject.unsqueeze(-1) * p_class).sum(1)
+        p_class = self.expert_logp(X).exp()                              # (B, K, C)
+        return (p_subject.unsqueeze(-1).to(p_class.dtype) * p_class).sum(1)
 
     @torch.inference_mode()
     def predict(self, X):
@@ -70,14 +194,21 @@ def build_model(meta, config, state=None):
         raise ValueError(f"n_times {meta['n_times']} != trained {config['n_times']}")
     if meta["n_classes"] != config["n_classes"]:
         raise ValueError(f"n_classes {meta['n_classes']} != trained {config['n_classes']}")
+    use_riemann = config.get("riemann_experts", False)
     model = FingerprintMixture(
         n_chans=len(train_chs), n_times=config["n_times"],
         n_classes=config["n_classes"], n_experts=len(config["experts"]),
-        channel_index=[eval_chs.index(c) for c in train_chs])
+        channel_index=[eval_chs.index(c) for c in train_chs],
+        fingerprint=config.get("fingerprint", "eegnet"),
+        n_bands=config.get("fingerprint_n_bands", 6),
+        riemann_n_times_out=config["riemann_n_times_out"] if use_riemann else None)
     if state is not None:
         model.fingerprint.load_state_dict(state["fingerprint"])
         for expert, sd in zip(model.experts, state["experts"]):
             expert.load_state_dict(sd)
+        if use_riemann:
+            model.riemann.load_state_dict(state["riemann"])
+            model.combiner.load_state_dict(state["combiner"])
     return model.to(meta["device"]).eval()
 
 
