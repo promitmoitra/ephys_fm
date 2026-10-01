@@ -1,0 +1,162 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Loop B Progress</title><style>
+:root{--surface:#fcfcfb;--text:#0b0b0b;--muted:#52514e;--grid:#e4e3df;--zero:#9a9893;
+--s1:#2a78d6;--s2:#eb6834;--card:#ffffff;--border:#e4e3df}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--surface:#1a1a19;--text:#fff;
+--muted:#c3c2b7;--grid:#383835;--zero:#77766f;--s1:#3987e5;--s2:#d95926;--card:#222221;--border:#383835}}
+:root[data-theme="dark"]{--surface:#1a1a19;--text:#fff;--muted:#c3c2b7;--grid:#383835;--zero:#77766f;
+--s1:#3987e5;--s2:#d95926;--card:#222221;--border:#383835}
+body{margin:0;background:var(--surface);color:var(--text);font:15px/1.55 system-ui,sans-serif}
+main{max-width:760px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:1.6rem;margin:.2em 0}h2{font-size:1.15rem;margin:2em 0 .4em}
+.sub{color:var(--muted)}.card{background:var(--card);border:1px solid var(--border);
+border-radius:8px;padding:14px 16px;margin:12px 0}
+.tiles{display:flex;gap:12px;flex-wrap:wrap}.tile{flex:1 1 150px;background:var(--card);
+border:1px solid var(--border);border-radius:8px;padding:12px}
+.tile b{display:block;font-size:1.6rem}.tile span{color:var(--muted);font-size:.85rem}
+table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;
+padding:5px 8px;border-bottom:1px solid var(--border)}td.n,th.n{text-align:right;
+font-variant-numeric:tabular-nums}
+.chart{width:100%;height:auto}.chart text{fill:var(--text)}.tick,.axis{fill:var(--muted)!important;
+font-size:11px}.lab{font-size:13px}.grid{stroke:var(--grid);stroke-width:1}
+.zero{stroke:var(--zero);stroke-width:1.5}.diag{stroke:var(--zero);stroke-dasharray:4 4}
+.ci{stroke-width:2;stroke-linecap:round}.s1.ci{stroke:var(--s1)}.s2.ci{stroke:var(--s2)}
+.s1.dot{fill:var(--s1);stroke:var(--surface);stroke-width:2}.s2.dot{fill:var(--s2);
+stroke:var(--surface);stroke-width:2}.pt:hover .dot{r:7}
+.legend{display:flex;gap:16px;font-size:.85rem;color:var(--muted)}.sw{display:inline-block;
+width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+details{margin:6px 0}code{font-size:.85em}
+</style></head><body><main>
+<p class="sub">Track 2 · autoresearch loop B · report 001 · 2026-09-30</p>
+<h1>Learned weights for per-person experts</h1>
+<p>Each evaluation person has a fine-tuned EEGNet expert and a Riemannian tangent-space (ts)
+expert. The question: which combination rule, learned on calibration data only, is best on the
+hidden runs? All numbers are on the Dreyer sealed-phase simulation with oracle person ID,
+unless marked soft-routed.</p>
+<div class="tiles">
+<div class="tile"><span>EEGNet alone, R4–R6</span><b>0.908</b><span>NLL 0.235</span></div>
+<div class="tile"><span>Adopted rule C3, R4–R6</span><b>0.921</b><span>NLL 0.209</span></div>
+<div class="tile"><span>C3 soft-routed with loop A's fingerprint</span><b>0.921</b><span>EEGNet alone 0.907</span></div>
+</div>
+
+<h2>1 · The plain average was the wrong rule; log-space pooling is robust</h2>
+<p>Gain over EEGNet alone (mean per-person balanced accuracy, person-bootstrap 95% CI). The
+dev bank has every calibration run held out in turn (2,520 windows). The plain average swings
+with the split. The log-space rules have a non-negative point estimate on every split, and on the test runs their CI clears zero.</p>
+<div class="legend"><span><i class="sw" style="background:var(--s1)"></i>dev (cross-fitted R1–R3)</span>
+<span><i class="sw" style="background:var(--s2)"></i>test (R4–R6)</span></div>
+<div class="card"><svg viewBox="0 0 640 262" role="img" aria-labelledby="f1t" class="chart">
+<title id="f1t">Gain over EEGNet alone, dev vs test, with 95% CIs</title>
+<line x1="220.4" x2="220.4" y1="22" y2="234" class="grid"/>
+<text x="220.4" y="252" class="tick" text-anchor="middle">-0.03</text>
+<line x1="281.3" x2="281.3" y1="22" y2="234" class="grid"/>
+<text x="281.3" y="252" class="tick" text-anchor="middle">-0.02</text>
+<line x1="342.1" x2="342.1" y1="22" y2="234" class="grid"/>
+<text x="342.1" y="252" class="tick" text-anchor="middle">-0.01</text>
+<line x1="403.0" x2="403.0" y1="22" y2="234" class="zero"/>
+<text x="403.0" y="252" class="tick" text-anchor="middle">+0.00</text>
+<line x1="463.9" x2="463.9" y1="22" y2="234" class="grid"/>
+<text x="463.9" y="252" class="tick" text-anchor="middle">+0.01</text>
+<line x1="524.7" x2="524.7" y1="22" y2="234" class="grid"/>
+<text x="524.7" y="252" class="tick" text-anchor="middle">+0.02</text>
+<line x1="585.6" x2="585.6" y1="22" y2="234" class="grid"/>
+<text x="585.6" y="252" class="tick" text-anchor="middle">+0.03</text>
+<text x="0" y="52" class="lab">Plain average</text>
+<g class="pt"><title>Plain average — dev (cross-fitted R1–R3): -0.008 [-0.028, +0.011]</title><rect x="190" y="27" width="426" height="22" fill="transparent"/><line x1="231.5" x2="470.6" y1="38" y2="38" class="s1 ci"/><circle cx="354.7" cy="38" r="5" class="s1 dot"/></g>
+<g class="pt"><title>Plain average — test (R4–R6): +0.014 [-0.002, +0.031]</title><rect x="190" y="53" width="426" height="22" fill="transparent"/><line x1="390.9" x2="589.0" y1="64" y2="64" class="s2 ci"/><circle cx="487.5" cy="64" r="5" class="s2 dot"/></g>
+<text x="0" y="118" class="lab">C1 log-linear</text>
+<g class="pt"><title>C1 log-linear — dev (cross-fitted R1–R3): +0.002 [-0.009, +0.012]</title><rect x="190" y="93" width="426" height="22" fill="transparent"/><line x1="347.5" x2="477.9" y1="104" y2="104" class="s1 ci"/><circle cx="415.1" cy="104" r="5" class="s1 dot"/></g>
+<g class="pt"><title>C1 log-linear — test (R4–R6): +0.014 [+0.004, +0.025]</title><rect x="190" y="119" width="426" height="22" fill="transparent"/><line x1="429.6" x2="555.1" y1="130" y2="130" class="s2 ci"/><circle cx="489.9" cy="130" r="5" class="s2 dot"/></g>
+<text x="0" y="184" class="lab">C3 reliability-weighted</text>
+<g class="pt"><title>C3 reliability-weighted — dev (cross-fitted R1–R3): +0.008 [-0.003, +0.019]</title><rect x="190" y="159" width="426" height="22" fill="transparent"/><line x1="386.1" x2="518.9" y1="170" y2="170" class="s1 ci"/><circle cx="451.3" cy="170" r="5" class="s1 dot"/></g>
+<g class="pt"><title>C3 reliability-weighted — test (R4–R6): +0.014 [+0.003, +0.025]</title><rect x="190" y="185" width="426" height="22" fill="transparent"/><line x1="422.3" x2="555.1" y1="196" y2="196" class="s2 ci"/><circle cx="487.5" cy="196" r="5" class="s2 dot"/></g>
+</svg></div>
+<details><summary>Table view</summary><table><tr><th>Rule</th><th class=n>Dev Δ [CI]</th>
+<th class=n>Test Δ [CI]</th></tr><tr><td>Plain average</td><td class=n>-0.008 [-0.028, +0.011]</td><td class=n>+0.014 [-0.002, +0.031]</td></tr><tr><td>C1 log-linear</td><td class=n>+0.002 [-0.009, +0.012]</td><td class=n>+0.014 [+0.004, +0.025]</td></tr><tr><td>C3 reliability-weighted</td><td class=n>+0.008 [-0.003, +0.019]</td><td class=n>+0.014 [+0.003, +0.025]</td></tr></table></details>
+
+<h2>2 · Why: the ts expert is over-confident, and whether it works is a person trait</h2>
+<p>ts is near-perfect for about 6 of 21 people and at chance for about 9. It is equally
+confident either way (mean confidence 0.755 at 0.680 accuracy; EEGNet 0.883 at 0.887). A plain
+average therefore lets chance-level ts votes overrule EEGNet. A person's ts accuracy from one
+calibration run to another predicts their held-out ts accuracy almost perfectly. The adopted
+rule weights ts by that reliability: weight ≈ 0.1 at chance, ≈ 1.0 at 0.9.</p>
+<div class="card"><svg viewBox="0 0 640 330" role="img" aria-labelledby="f2t" class="chart">
+<title id="f2t">Per-person calibration reliability vs held-out ts accuracy</title>
+<line x1="52.0" x2="52.0" y1="16" y2="286" class="grid"/>
+<line x1="52" x2="624" y1="286.0" y2="286.0" class="grid"/>
+<text x="52.0" y="302" class="tick" text-anchor="middle">0.4</text>
+<text x="44" y="290.0" class="tick" text-anchor="end">0.4</text>
+<line x1="147.3" x2="147.3" y1="16" y2="286" class="grid"/>
+<line x1="52" x2="624" y1="241.0" y2="241.0" class="grid"/>
+<text x="147.3" y="302" class="tick" text-anchor="middle">0.5</text>
+<text x="44" y="245.0" class="tick" text-anchor="end">0.5</text>
+<line x1="242.7" x2="242.7" y1="16" y2="286" class="grid"/>
+<line x1="52" x2="624" y1="196.0" y2="196.0" class="grid"/>
+<text x="242.7" y="302" class="tick" text-anchor="middle">0.6</text>
+<text x="44" y="200.0" class="tick" text-anchor="end">0.6</text>
+<line x1="338.0" x2="338.0" y1="16" y2="286" class="grid"/>
+<line x1="52" x2="624" y1="151.0" y2="151.0" class="grid"/>
+<text x="338.0" y="302" class="tick" text-anchor="middle">0.7</text>
+<text x="44" y="155.0" class="tick" text-anchor="end">0.7</text>
+<line x1="433.3" x2="433.3" y1="16" y2="286" class="grid"/>
+<line x1="52" x2="624" y1="106.0" y2="106.0" class="grid"/>
+<text x="433.3" y="302" class="tick" text-anchor="middle">0.8</text>
+<text x="44" y="110.0" class="tick" text-anchor="end">0.8</text>
+<line x1="528.7" x2="528.7" y1="16" y2="286" class="grid"/>
+<line x1="52" x2="624" y1="61.0" y2="61.0" class="grid"/>
+<text x="528.7" y="302" class="tick" text-anchor="middle">0.9</text>
+<text x="44" y="65.0" class="tick" text-anchor="end">0.9</text>
+<line x1="624.0" x2="624.0" y1="16" y2="286" class="grid"/>
+<line x1="52" x2="624" y1="16.0" y2="16.0" class="grid"/>
+<text x="624.0" y="302" class="tick" text-anchor="middle">1.0</text>
+<text x="44" y="20.0" class="tick" text-anchor="end">1.0</text>
+<line x1="52.0" y1="286.0" x2="624.0" y2="16.0" class="diag"/>
+<text x="338.0" y="324" class="axis" text-anchor="middle">reliability: run-to-run ts accuracy on calibration data</text>
+<text transform="translate(14 143.0) rotate(-90)" class="axis" text-anchor="middle">held-out ts accuracy</text>
+<g class="pt"><title>person 1: reliability 0.83, held-out ts 0.85, EEGNet 0.99</title><circle cx="457.2" cy="83.5" r="10" fill="transparent"/><circle cx="457.2" cy="83.5" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 2: reliability 0.92, held-out ts 0.93, EEGNet 0.90</title><circle cx="548.5" cy="49.7" r="10" fill="transparent"/><circle cx="548.5" cy="49.7" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 3: reliability 0.55, held-out ts 0.58, EEGNet 0.86</title><circle cx="199.0" cy="203.5" r="10" fill="transparent"/><circle cx="199.0" cy="203.5" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 4: reliability 0.52, held-out ts 0.51, EEGNet 0.85</title><circle cx="163.2" cy="237.3" r="10" fill="transparent"/><circle cx="163.2" cy="237.3" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 5: reliability 0.91, held-out ts 0.94, EEGNet 0.86</title><circle cx="540.6" cy="42.2" r="10" fill="transparent"/><circle cx="540.6" cy="42.2" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 6: reliability 0.55, held-out ts 0.54, EEGNet 0.72</title><circle cx="195.0" cy="222.2" r="10" fill="transparent"/><circle cx="195.0" cy="222.2" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 7: reliability 0.50, held-out ts 0.49, EEGNet 0.94</title><circle cx="151.3" cy="244.8" r="10" fill="transparent"/><circle cx="151.3" cy="244.8" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 8: reliability 0.50, held-out ts 0.52, EEGNet 0.82</title><circle cx="151.3" cy="233.5" r="10" fill="transparent"/><circle cx="151.3" cy="233.5" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 9: reliability 0.90, held-out ts 0.92, EEGNet 0.93</title><circle cx="524.7" cy="53.5" r="10" fill="transparent"/><circle cx="524.7" cy="53.5" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 10: reliability 0.50, held-out ts 0.53, EEGNet 0.86</title><circle cx="151.3" cy="229.8" r="10" fill="transparent"/><circle cx="151.3" cy="229.8" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 11: reliability 0.45, held-out ts 0.47, EEGNet 0.91</title><circle cx="103.6" cy="252.3" r="10" fill="transparent"/><circle cx="103.6" cy="252.3" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 12: reliability 0.52, held-out ts 0.49, EEGNet 0.95</title><circle cx="167.2" cy="244.8" r="10" fill="transparent"/><circle cx="167.2" cy="244.8" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 13: reliability 0.95, held-out ts 0.94, EEGNet 0.95</title><circle cx="572.4" cy="42.2" r="10" fill="transparent"/><circle cx="572.4" cy="42.2" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 14: reliability 0.56, held-out ts 0.66, EEGNet 0.88</title><circle cx="206.9" cy="169.8" r="10" fill="transparent"/><circle cx="206.9" cy="169.8" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 15: reliability 0.59, held-out ts 0.65, EEGNet 0.84</title><circle cx="234.7" cy="173.5" r="10" fill="transparent"/><circle cx="234.7" cy="173.5" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 16: reliability 0.88, held-out ts 0.88, EEGNet 0.93</title><circle cx="504.8" cy="68.5" r="10" fill="transparent"/><circle cx="504.8" cy="68.5" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 17: reliability 0.50, held-out ts 0.53, EEGNet 0.86</title><circle cx="147.3" cy="226.0" r="10" fill="transparent"/><circle cx="147.3" cy="226.0" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 18: reliability 0.62, held-out ts 0.63, EEGNet 0.67</title><circle cx="258.6" cy="181.0" r="10" fill="transparent"/><circle cx="258.6" cy="181.0" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 19: reliability 0.82, held-out ts 0.96, EEGNet 0.93</title><circle cx="453.2" cy="34.8" r="10" fill="transparent"/><circle cx="453.2" cy="34.8" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 20: reliability 0.50, held-out ts 0.50, EEGNet 0.79</title><circle cx="151.3" cy="241.0" r="10" fill="transparent"/><circle cx="151.3" cy="241.0" r="5" class="s1 dot"/></g>
+<g class="pt"><title>person 21: reliability 0.51, held-out ts 0.51, EEGNet 0.96</title><circle cx="159.3" cy="237.3" r="10" fill="transparent"/><circle cx="159.3" cy="237.3" r="5" class="s1 dot"/></g>
+</svg></div>
+<details><summary>Table view (per person)</summary><table><tr><th>Person</th>
+<th class=n>Reliability</th><th class=n>Held-out ts</th><th class=n>EEGNet</th></tr><tr><td>1</td><td class=n>0.83</td><td class=n>0.85</td><td class=n>0.99</td></tr><tr><td>2</td><td class=n>0.92</td><td class=n>0.93</td><td class=n>0.90</td></tr><tr><td>3</td><td class=n>0.55</td><td class=n>0.58</td><td class=n>0.86</td></tr><tr><td>4</td><td class=n>0.52</td><td class=n>0.51</td><td class=n>0.85</td></tr><tr><td>5</td><td class=n>0.91</td><td class=n>0.94</td><td class=n>0.86</td></tr><tr><td>6</td><td class=n>0.55</td><td class=n>0.54</td><td class=n>0.72</td></tr><tr><td>7</td><td class=n>0.50</td><td class=n>0.49</td><td class=n>0.94</td></tr><tr><td>8</td><td class=n>0.50</td><td class=n>0.52</td><td class=n>0.82</td></tr><tr><td>9</td><td class=n>0.90</td><td class=n>0.92</td><td class=n>0.93</td></tr><tr><td>10</td><td class=n>0.50</td><td class=n>0.53</td><td class=n>0.86</td></tr><tr><td>11</td><td class=n>0.45</td><td class=n>0.47</td><td class=n>0.91</td></tr><tr><td>12</td><td class=n>0.52</td><td class=n>0.49</td><td class=n>0.95</td></tr><tr><td>13</td><td class=n>0.95</td><td class=n>0.94</td><td class=n>0.95</td></tr><tr><td>14</td><td class=n>0.56</td><td class=n>0.66</td><td class=n>0.88</td></tr><tr><td>15</td><td class=n>0.59</td><td class=n>0.65</td><td class=n>0.84</td></tr><tr><td>16</td><td class=n>0.88</td><td class=n>0.88</td><td class=n>0.93</td></tr><tr><td>17</td><td class=n>0.50</td><td class=n>0.53</td><td class=n>0.86</td></tr><tr><td>18</td><td class=n>0.62</td><td class=n>0.63</td><td class=n>0.67</td></tr><tr><td>19</td><td class=n>0.82</td><td class=n>0.96</td><td class=n>0.93</td></tr><tr><td>20</td><td class=n>0.50</td><td class=n>0.50</td><td class=n>0.79</td></tr><tr><td>21</td><td class=n>0.51</td><td class=n>0.51</td><td class=n>0.96</td></tr></table></details>
+
+<h2>3 · Checkpoint 2 on the hidden runs</h2>
+<p>Combiners fitted on the dev bank, applied unchanged. The candidates and the adoption rule
+were committed before this ran.</p>
+<table><tr><th>ID</th><th>Rule</th><th class=n>Oracle acc</th><th class=n>NLL</th>
+<th class=n>Soft (loop A fp)</th></tr><tr><td>R0</td><td>EEGNet only</td><td class=n>0.908</td><td class=n>0.235</td><td class=n>0.907</td></tr><tr><td>R1</td><td>equal average, ts</td><td class=n>0.921</td><td class=n>0.325</td><td class=n>0.921</td></tr><tr><td>H3</td><td>log-linear + bias, ts</td><td class=n>0.921</td><td class=n>0.212</td><td class=n>0.920</td></tr><tr><td>C1</td><td>H4 log-linear, ts</td><td class=n>0.922</td><td class=n>0.212</td><td class=n>0.921</td></tr><tr><td>C2</td><td>H3 log-linear + bias, ts_C0.1</td><td class=n>0.920</td><td class=n>0.209</td><td class=n>0.919</td></tr><tr><td>C3</td><td>H8 reliability-weighted, ts_C0.1</td><td class=n>0.921</td><td class=n>0.209</td><td class=n>0.921</td></tr><tr><td>C4</td><td>H8 reliability-weighted, ts</td><td class=n>0.920</td><td class=n>0.213</td><td class=n>0.918</td></tr></table>
+
+<h2>What I learned about the method</h2>
+<ul><li>A 40-window-per-person dev set (R3 only) gave the <em>wrong sign</em> for the ts effect.
+Cross-fitting all calibration runs tripled the dev data; even then, rules differ by less than
+the ±0.011 CI. The consistent signal is the NLL gain of log-space pooling.</li>
+<li>Filter banks, other windows and CSP don't make a better classical expert. Regularising it
+(C = 0.1) does, because it fixes calibration.</li></ul>
+
+<h2>Next</h2>
+<ul><li><b>Running:</b> seed robustness. EEGNet experts for training seeds 1 and 2, with
+the same combiners applied unchanged (protocol 04).</li>
+<li>Then: an integration plan for <code>submission.py</code> (per-person tangent-space + LR as
+torch tensors, like loop A's fingerprint export), and a PR.</li></ul>
+<p class="sub">Source: <code>research/</code> in worktree <code>t2-expert-weights</code>, branch
+<code>exp/expert-weights</code>. Protocols were committed before their results.</p>
+</main></body></html>

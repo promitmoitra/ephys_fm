@@ -1,0 +1,56 @@
+project:
+  title: "Track 2 loop B: learned expert weights"
+  question: >
+    Which combination rule for each person's EEGNet expert and classical (Riemannian ts, CSP)
+    experts, learned on calibration data only, gives the best soft-routed mixture on the
+    Dreyer sealed-phase simulation's hidden runs?
+  status: concluded
+  started: "2026-09-30"
+  domain: "EEG motor-imagery decoding, ensembling / stacking"
+  worktree: .claude/worktrees/t2-expert-weights
+  branch: exp/expert-weights
+
+literature:
+  key_papers: []
+  open_problems: []
+
+hypotheses:
+  - {id: H1, statement: "One global EEGNet/ts weight chosen by log-loss beats the equal average", status: inconclusive, note: "dev: w_eeg 0.915, = EEGNet alone; dev too small (P01)"}
+  - {id: H2, statement: "Per-person weights", status: inconclusive, note: "dev 0.891 +-0.002 (best, within noise); re-test on xfit bank"}
+  - {id: H3, statement: "Stacking: log-linear + bias on log-probs", status: front-runner, note: "dev 0.882/NLL 0.300; R4-R6 0.921/NLL 0.214 (R0 0.908/0.235) at checkpoint 1"}
+  - {id: H4, statement: "Log-linear pooling beats linear pooling", status: inconclusive}
+  - {id: H5, statement: "Per-expert temperature before pooling", status: refuted-as-predicted, note: "EEGNet is calibrated (T<1 learned); ts is the over-confident expert"}
+  - {id: H6, statement: "Confidence gating per window", status: refuted, note: "where EEGNet is unsure, ts is even worse (0.61 vs 0.69)"}
+  - {id: H7, statement: "CSP with a learned weight", status: supported, note: "weight ~0.04; CSP adds nothing"}
+  - {id: H8, statement: "Per-person reliability weights for ts", status: supported, note: "rel predicts held-out ts acc r=0.94-0.99; best dev NLL; +0.004 over H3 on ts_C0.1 (criterion 0.005 narrowly missed); adopted as C3"}
+  - {id: H9, statement: "Better classical expert", status: partly-supported, note: "bands/windows don't help; regularisation C=0.1 (calibration) does; ts_C0.1 selected"}
+  - {id: H10, statement: "Gain robust to EEGNet training seed", status: supported, note: "C3 +0.014/+0.020/+0.024 over seeds 0-2, all CIs > 0"}
+  - {id: H11, statement: "Dreyer-fitted coefficients transfer zero-shot to BNCI 2014-001", status: supported, note: "+0.052-0.054, 5/5; BNCI-optimal weights differ (EEGNet over-confident across days)"}
+
+experiments:
+  proxy_metric: "Dev bank (experts on R1-R2 -> R3), true ID, out-of-fold balanced accuracy (LOPO for global, within-person 2-fold x5 for per-person); NLL secondary"
+  baseline_value: "dev R3: EEGNet alone 0.887 / NLL 0.312"
+  best_value: "xfit dev: C3 (H8 ts_C0.1) 0.883 / NLL 0.278; test R4-R6 (checkpoint 2): C3 0.921 / 0.209 (R0 0.908 / 0.235)"
+  total_runs: 45
+  trajectory: []
+
+jobs:
+  - {name: bank_dev_seed0, status: done, finished: "2026-09-30 12:20"}
+  - {name: bank_test_packaged, status: done}
+  - {name: bank_xfit_seed0, status: done}
+  - {name: bank_test_seed1, started: "2026-09-30 20:35", log: outputs/t2-expert-weights/bank_test_seed1.log}
+  - {name: bank_test_seed2, started: "2026-09-30 20:35", log: outputs/t2-expert-weights/bank_test_seed2.log}
+  - {name: bnci_experts, started: "2026-09-30 20:57", log: outputs/t2-expert-weights/bnci/experts.log}
+next: "concluded: README updates + PR; integration with loop A's fingerprint is the next (joint) step"
+
+outer_loop:
+  cycle: 3
+  last_direction: conclude
+  previous: "cycle 1: deepen evaluation (xfit bank)"
+  last_reflection: "C3 robust over 3 seeds (+0.019) and transfers to BNCI (+0.052). Conclude; hand off integration and sealed-phase refit."
+
+confirmation:
+  reference_R4R6: {eegnet_soft: 0.901, eegnet_oracle: 0.908, eegnet_ts_avg_soft: 0.909}
+  checkpoints:
+    - {id: checkpoint-2, candidates: [C1, C2, C3, C4], oracle: {R0: 0.908, R1: 0.921, C1: 0.922, C2: 0.920, C3: 0.921, C4: 0.920}, adopted: C3}
+    - {id: checkpoint-1, candidates: [R0, R1, H5a, H3], oracle: {R0: 0.908, R1: 0.921, H5a: 0.917, H3: 0.921}, nll: {R0: 0.235, R1: 0.325, H3: 0.214}}
