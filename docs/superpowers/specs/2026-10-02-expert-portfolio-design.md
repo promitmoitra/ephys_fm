@@ -145,8 +145,10 @@ two-stream counterpart.
 4. **Integration:** shippable streams packaged by `train_mixture.py`, scored through `predict`,
    and passing the kit contract check offline (`HF_HUB_OFFLINE=1`).
 5. **Comparison page (by-product):**
-   - **Solvers:** each model is a standalone benchopt solver under `track2/bench/` that loads
-     weights relative to its own file, so several solvers can run in one `benchopt run`.
+   - **Solvers:** each model is a standalone benchopt solver under `track2/bench/`. It loads
+     weights from the kit's per-solver folder, `tracks/bci_decoding/outputs/<Solver.name>/`
+     (the kit's default when `COMPET_SUBMISSION_DIR` is unset), so several solvers can run in
+     one `benchopt run`.
    - **Leakage-free weights:** trained on the warm-up train split only, with no evaluation-people
      labels; safe to show.
    - **Line-up:** Constant, MeanLogReg, EEGNet (kit), ShallowFBCSPNet, the REVE probe, and the
