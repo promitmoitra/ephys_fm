@@ -100,7 +100,8 @@ def evaluate_dev(lam):
         d_nll = person_nll(y, t, z["oof"], K) - person_nll(y, t, a["oof"], K)
         res["drop"][drop] = {"acc_cost": a["bal_acc"] - z["bal_acc"], "acc_ci": boot_ci(d_acc),
                              "nll_cost": z["nll"] - a["nll"], "nll_ci": boot_ci(d_nll)}
-        crit_a = res["drop"][drop]["acc_cost"] >= 0.005
+        # amendment 1: the accuracy route also needs its CI to exclude zero
+        crit_a = res["drop"][drop]["acc_cost"] >= 0.005 and res["drop"][drop]["acc_ci"][1] > 0
         crit_n = res["drop"][drop]["nll_cost"] >= 0.005 and res["drop"][drop]["nll_ci"][1] > 0
         res["drop"][drop]["passes_a"] = bool(crit_a or crit_n)
     return res, b

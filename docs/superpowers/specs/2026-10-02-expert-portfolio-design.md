@@ -121,8 +121,10 @@ The fingerprint, routing, EEGNet experts and the Riemannian experts.
 ### Decision rule (fixed in this spec; repeated in the loop's first protocol)
 
 A new stream is a **ship candidate** if both hold:
-- **(a) Dev bank:** dropping it from the full combination costs ≥ 0.005 balanced accuracy, or
-  ≥ 0.005 NLL with the bootstrap CI of the NLL difference excluding zero.
+- **(a) Dev bank:** dropping it from the full combination costs ≥ 0.005 balanced accuracy with
+  the bootstrap CI of the per-person accuracy difference excluding zero, or ≥ 0.005 NLL with the
+  bootstrap CI of the NLL difference excluding zero (accuracy CI added by amendment 1, before any
+  scoring: the dev bank resolves only about ±0.011).
 - **(b) BNCI:** adding it to the shipped two-stream combination does not lower balanced accuracy
   (mean over 5 seeds ≥ −0.005) with Dreyer-fitted weights.
 

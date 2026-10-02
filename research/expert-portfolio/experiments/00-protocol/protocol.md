@@ -44,3 +44,15 @@ are optimistic upper bounds and are report-only here.
 3, 8, 10, 14, 19, 20, 40, 45, 46, 47, 50, 55, 58, 82. Hidden runs R4–R6 are complete (40
 windows per run) and class-balanced for all 14. Person 40 has 32 windows in R3 (calibration),
 so sim2 calibration has 1,672 windows (not 1,680); the draw is kept as drawn.
+
+## Amendment 1 (2026-10-02, before any new-stream bank existed or was scored)
+
+Condition (a)'s accuracy route now also requires its person-bootstrap 95% CI to exclude zero,
+like the NLL route already did. Reason: loop B measured this dev bank's resolution at about
+±0.011 (95% CI of a per-person rule difference), so a 0.005 point estimate alone can be noise.
+Shipping REVE adds a 69M-parameter model that must load offline; that cost should buy a gain
+that is distinguishable from zero.
+
+(a) now reads: dropping the stream from the full combination costs ≥ 0.005 balanced accuracy
+**with the CI of the per-person accuracy difference excluding zero**, or ≥ 0.005 NLL with the CI
+of the NLL difference excluding zero. (b) and the sim2 / R4–R6 handling are unchanged.
