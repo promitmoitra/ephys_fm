@@ -36,7 +36,8 @@ braindecode defaults (2,018 parameters).
   (Rule 04).
 - **Local compute:** 8 CPU threads, 16 GB RAM, no GPU, shared with other sessions (≤ 4 threads
   for this loop).
-- **Evaluation discipline:** R4–R6 only at pre-registered checkpoints; protocols are committed
+- **Evaluation discipline:** R4–R6 are report-only upper bounds (already reused by loops A and B);
+  decisions use the dev bank and BNCI; honest Dreyer numbers come from sim2; protocols are committed
   before results.
 
 ## Components
@@ -102,7 +103,7 @@ The fingerprint, routing, EEGNet experts and the Riemannian experts.
    - The EEGNet and Riemannian folds already exist (`outputs/t2-expert-weights/`). Only S1 and S2
      are new: S1 costs head training only; S2 needs 3 pooled trainings.
    - 2,520 windows.
-2. **Dreyer test bank.** Each stream trained on R1–R3, predicting R4–R6. Used at the checkpoint
+2. **Dreyer test bank.** Each stream trained on R1–R3, predicting R4–R6. Report-only (upper bound),
    only.
 3. **BNCI 2014-001 cross-day bank.** Session 1 runs 0–4 train, run 5 val, session 2 test; 5
    seeds for trained parts (S1's frozen encoder is seed-free).
@@ -125,9 +126,26 @@ A new stream is a **ship candidate** if both hold:
 - **(b) BNCI:** adding it to the shipped two-stream combination does not lower balanced accuracy
   (mean over 5 seeds ≥ −0.005) with Dreyer-fitted weights.
 
-Candidates are confirmed once on R4–R6 at a pre-registered checkpoint, with seeds 0–2 for trained
-parts. They ship if the full combination is ≥ the shipped 0.921 (seed 0) with no seed below its
-two-stream counterpart.
+**The ship decision is made on (a) and (b) alone.** Dreyer's R4–R6 have already gated decisions
+in loops A and B, so their scores are now optimistic upper bounds and no longer choose anything.
+
+### Honest estimates (revised 2026-10-02)
+
+- **Fresh simulation, `sim2`:**
+  - 14 people drawn from the 52-person training pool, with a fixed seed **before** any training,
+    and never used for any choice.
+  - Their R1–R3 are calibration; their R4–R6 are hidden.
+  - The training pool is the other 38 training-pool people plus the 21 original evaluation people
+    (all six runs, as ordinary training people). The pooled model's epoch is still chosen on the
+    kit's val people.
+  - The whole pipeline runs on it (fingerprint, EEGNet experts, Riemannian experts, new streams;
+    combiner coefficients transferred from the dev bank) for seeds 0–2.
+  - This is the honest Dreyer estimate for the shipped design and for the candidates.
+- **R4–R6:** the candidates are also scored there (seeds 0–2), **report-only, labelled as upper
+  bounds**.
+- **Veto (pre-registered, gross failure only):** a candidate is withdrawn if the full combination
+  falls more than 0.02 below the two-stream combination on sim2 (mean over seeds) or on R4–R6.
+  Such a drop would point to a bug or a broken transfer, not a close call.
 
 ## Deliverables
 

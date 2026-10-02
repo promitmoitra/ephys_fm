@@ -33,7 +33,9 @@ routing (fingerprint) and combination stay architecture-agnostic.
 - Local compute: ≤ 4 CPU threads for this loop (`--threads 4`, `OMP_NUM_THREADS=4`). Long jobs:
   `setsid nohup .venv/bin/python … > log 2>&1 < /dev/null &`, then find the Python PID with
   `ps -C python -o pid,args`.
-- R4–R6 (Dreyer hidden runs) are used only at pre-registered checkpoints. Protocols are committed
+- R4–R6 (Dreyer hidden runs) are report-only upper bounds: loops A and B already reused them,
+  so they never gate a decision here except the pre-registered gross-failure veto. Ship decisions
+  use the dev bank and BNCI; honest Dreyer estimates come from sim2 (Task 9). Protocols are committed
   before their results (separate commits).
 - Branch `exp/expert-portfolio` only: run `git branch --show-current` before every commit.
   Never bare `git stash`. Commits end with
@@ -54,7 +56,7 @@ routing (fingerprint) and combination stay architecture-agnostic.
    value raises in `build_model`. Tests in Tasks 3 and 4.
 3. **The worker without network.** Expected: `load_model` builds REVE with
    `HF_HUB_OFFLINE=1` and the shipped positions file, with no download attempt. Test in Task 4
-   (stub encoder + env check); real check in Task 9's contract run under `HF_HUB_OFFLINE=1`.
+   (stub encoder + env check); real check in Task 10's contract run under `HF_HUB_OFFLINE=1`.
 4. **A constant (flat) channel in a window.** Expected: the z-score doesn't produce NaN (std is
    clamped). Test in Task 4.
 5. **An old `config.json` without the new keys.** Expected: it loads as before, with no REVE
@@ -129,7 +131,8 @@ checkpoints: []
 
 ## Lessons and constraints
 
-- R4–R6 are never used for decisions; confirm only pre-registered candidates.
+- R4–R6 are report-only upper bounds (reused by loops A and B); honest Dreyer numbers come
+  from sim2, whose 14 people are fixed in protocol 00 and never used for any choice.
 ```
 
 - [ ] **Step 2: Write the locked protocol**
@@ -146,7 +149,7 @@ Locked 2026-10-02, before any new stream exists. Source: the spec's "Evaluation 
    (per-person parts); 2,520 windows. Window order and masks identical to loop B's
    `outputs/t2-expert-weights/bank_xfit_seed0.npz` (fold r = 0, 1, 2; within a fold, dataset
    order of `split == "test" & run == r`).
-2. **Dreyer test bank:** streams trained on R1–R3, predicting R4–R6. Checkpoint only.
+2. **Dreyer test bank:** streams trained on R1–R3, predicting R4–R6. Report-only (upper bound).
 3. **BNCI 2014-001:** session 1 runs 0–4 train, run 5 val, session 2 test; seeds 0–4.
 
 ## Metrics (true person ID)
@@ -156,22 +159,54 @@ Locked 2026-10-02, before any new stream exists. Source: the spec's "Evaluation 
 - Shortcut diagnostic per stream: early-only input (samples ≥ 1.25 s zeroed) and late-only
   input (samples < 1.25 s zeroed); models trained on full windows.
 
-## Ship rule (from the spec, unchanged)
-A new stream is a ship candidate if
+## Ship rule (from the spec)
+A new stream ships if
 (a) dropping it from the full combination on the dev bank costs ≥ 0.005 balanced accuracy, or
 ≥ 0.005 NLL with the bootstrap CI of the NLL difference excluding zero; and
 (b) on BNCI, adding it to the shipped two-stream combination does not lower balanced accuracy
 (mean over 5 seeds ≥ −0.005) with Dreyer-fitted weights.
-Candidates are confirmed once on R4–R6 at a pre-registered checkpoint (seeds 0–2) and ship if
-the full combination is ≥ 0.921 (seed 0) with no seed below its two-stream counterpart.
+**Only (a) and (b) decide.** R4–R6 have already gated decisions in loops A and B; their scores
+are optimistic upper bounds and are report-only here.
+
+## Honest estimates
+- **sim2:**
+  - The 14 people in `sim2_people.json` (drawn below, before any training) are never used for
+    any choice.
+  - Their R1–R3 are calibration and their R4–R6 hidden.
+  - The training pool is the other 38 training-pool people plus all six runs of the 21 original
+    evaluation people; the pooled epoch is chosen on the kit's val people.
+  - Full pipeline, seeds 0–2.
+- **R4–R6:** candidates scored for seeds 0–2, report-only.
+- **Veto (gross failure only):** withdraw a candidate if the full combination is more than 0.02
+  below the two-stream combination on sim2 (mean over seeds 0–2) or on R4–R6 (mean over seeds
+  0–2).
 ```
+
+- [ ] **Step 2b: Draw and lock the sim2 people**
+
+Run:
+```bash
+.venv/bin/python - <<'EOF'
+import json, numpy as np
+d = np.load("data/experiments/dreyer_windows.npz", allow_pickle=True)
+pool = sorted(np.unique(d["subject"][d["split"] == "train"]), key=int)
+assert len(pool) == 52, len(pool)
+people = sorted(np.random.default_rng(20261002).choice(pool, 14, replace=False).tolist(), key=int)
+json.dump({"seed": 20261002, "from": "kit train split (52 people)", "people": people},
+          open("research/expert-portfolio/experiments/00-protocol/sim2_people.json", "w"), indent=2)
+print(people)
+EOF
+```
+Expected: 14 subject IDs printed and the JSON written. Every person must have 6 runs × 40
+windows; check with:
+`np.unique(d["run"][d["subject"] == s], return_counts=True)`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git branch --show-current   # expect exp/expert-portfolio
 git add research/expert-portfolio
-git commit -m "research(protocol): loop C workspace and locked evaluation (protocol 00)
+git commit -m "research(protocol): loop C workspace, locked evaluation and sim2 people (protocol 00)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1345,7 +1380,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 7: Protocol 01 and the dev / BNCI evaluation (ship candidates)
+### Task 7: Protocol 01 and the dev / BNCI evaluation (the ship decision)
 
 **Files:**
 - Create: `research/expert-portfolio/experiments/01-dev-eval/protocol.md`
@@ -1553,7 +1588,22 @@ Write it from the JSONs:
 - the shortcut readout;
 - **the candidate list** (streams passing both).
 
-If none pass, the finding is "neither new stream earns weight", and Tasks 8–9 are skipped.
+If none pass, the finding is "neither new stream earns weight"; Task 8 is still built (sim2
+support), Task 9 runs its E+T part only, and Task 10 is skipped.
+
+Write the shipped combination's coefficients, in stream order [EEGNet, Shallow, REVE] with only
+the shipped streams, fitted on the full dev bank:
+```bash
+.venv/bin/python -W ignore - <<'EOF'
+import json, sys; sys.path.insert(0, 'research/expert-portfolio/src')
+from portfolio import PortfolioLogLinear, dev_bank, own, OUT
+LAM = 0.1                                   # the λ chosen in Step 3
+NEURAL = ["eegnet", "shallow", "reve"]      # keep only the shipped streams, in this order
+dev = dev_bank(LAM); ex = [*NEURAL, "ts", "rel"]
+coef = PortfolioLogLinear(ex).fit(own(dev, ex), dev["y"]).describe()
+(OUT / "portfolio_coef.json").write_text(json.dumps(coef)); print(coef)
+EOF
+```
 
 - [ ] **Step 6: Commit results**
 
@@ -1567,109 +1617,94 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 8: Pre-registered checkpoint on R4–R6 (only if Task 7 found candidates)
+### Task 8: Packaging flags for the new streams, and sim2 support in `train_mixture.py`
 
 **Files:**
-- Create: `research/expert-portfolio/experiments/checkpoint-1/protocol.md`
-- Create: `research/expert-portfolio/experiments/checkpoint-1/run.py`
-- Create: `research/expert-portfolio/experiments/checkpoint-1/analysis.md`
+- Modify: `track2/train_mixture.py`
+- Modify: `track2/tests/test_portfolio.py` (mask helper test)
 
 **Interfaces:**
 - Consumes:
-  - test banks `bank_test_shallow_seed{0,1,2}.npz` and `bank_test_reve_lam{λ}.npz`, from
-    `stream_bank.py dreyer --bank test`;
-  - loop B's `bank_test_packaged.npz` (seed 0) and `bank_test_seed{1,2}.npz` (EEGNet experts,
-    `fp`), plus `classical_test_ts_C0.1.npy` and `rel_test`.
+  - `stream_bank.train_stream(X, y, pool, val, cal_sets, sfreq, seed, threads, epochs=100, ft_epochs=50) -> (pooled, experts, info)`;
+  - `reve_parts.*` and `submission.load_reve_encoder(positions_dir)`;
+  - the combiner coefficients JSON from Task 7: `{"w": [...], "c": [c0, c1], "b": [b1]}`, stream
+    order [EEGNet, Shallow, REVE] (only the streams present).
+- Produces:
+  - `train_mixture.masks(d, eval_people=None) -> (train_mask, calib, hidden, people)`;
+  - flags `--eval-people FILE`, `--shallow-experts`, `--reve-probe`, `--reve-lam`,
+    `--reve-emb-cache FILE`, `--combiner {C3,portfolio}`, `--portfolio-coef FILE`.
+  - Results tags gain `_sim2`, `_shallow`, `_reve` and `_portfolio` suffixes.
+  - In portfolio mode, the score table also reports the C3 two-stream rows, computed from the
+    same experts, so every run compares like with like.
 
-- [ ] **Step 1: Generate the test banks**
-
-For each candidate stream:
-- S: `dreyer --stream shallow --bank test --seed {0,1,2}`, in the background.
-- R: `dreyer --stream reve --bank test`, which writes all λ; use the chosen one.
-
-- [ ] **Step 2: Write and commit the protocol before scoring**
-
-`protocol.md` lists:
-- the candidate combinations (E+T+candidates), fitted once on the full dev bank;
-- the reference E+T (0.921 seed 0);
-- the ship rule: full combination ≥ 0.921 on seed 0, and on seeds 1 and 2 ≥ that seed's E+T.
-
-Commit it as `research(protocol): loop C checkpoint 1`.
-
-- [ ] **Step 3: Write `run.py`**
+- [ ] **Step 1: Write the failing mask test** (append to `track2/tests/test_portfolio.py`)
 
 ```python
-import json, sys
-from pathlib import Path
-import numpy as np
-REPO = Path(__file__).resolve().parents[4]
-sys.path.insert(0, str(REPO / "research" / "expert-portfolio" / "src"))
-from portfolio import LOOPB, OUT, PortfolioLogLinear, bal, dev_bank, nll, own  # noqa: E402
-
-LAM = float(sys.argv[1]); CANDS = sys.argv[2].split(",")          # e.g. 0.1 shallow,reve
-dev = dev_bank(LAM)
-c = np.load(LOOPB / "classical_xfit_ts_C0.1.npz")
-res = {}
-for seed, name in [(0, "bank_test_packaged.npz"), (1, "bank_test_seed1.npz"), (2, "bank_test_seed2.npz")]:
-    t = dict(np.load(LOOPB / name, allow_pickle=True))
-    t["ts"] = np.load(LOOPB / "classical_test_ts_C0.1.npy")
-    t["rel"] = np.broadcast_to(c["rel_test"][None, :, None], t["eegnet"].shape[:2] + (1,)).copy()
-    if "reve" in CANDS:
-        t["reve"] = np.load(OUT / f"bank_test_reve_lam{LAM}.npz")["reve"]
-    if "shallow" in CANDS:
-        t["shallow"] = np.load(OUT / f"bank_test_shallow_seed{seed}.npz")["shallow"]
-    row = {}
-    for label, neural in {"E+T": ["eegnet"], "full": ["eegnet", *CANDS]}.items():
-        ex = [*neural, "ts", "rel"]
-        comb = PortfolioLogLinear(ex).fit(own(dev, ex), dev["y"])
-        lp = comb.predict(own(t, ex))
-        soft = np.log((np.exp(t["fp"])[:, :, None] * np.exp(comb.predict({k: t[k] for k in ex}))).sum(1))
-        row[label] = {"oracle": bal(t["y"], lp), "nll": nll(lp, t["y"]), "soft_fp": bal(t["y"], soft)}
-    res[seed] = row
-out = Path(__file__).parent / "results.json"
-out.write_text(json.dumps(res, indent=2)); print(json.dumps(res, indent=2))
+    def test_masks_default_and_sim2(self):
+        import numpy as np
+        from train_mixture import masks
+        d = {"subject": np.array(["1", "1", "61", "61", "2", "2"]),
+             "run": np.array([0, 4, 0, 4, 1, 5]),
+             "split": np.array(["train", "train", "test", "test", "train", "train"])}
+        tr, cal, hid, people = masks(d)
+        self.assertEqual(people, ["61"])
+        self.assertEqual(tr.tolist(), [True, True, False, False, True, True])
+        self.assertEqual(cal.tolist(), [False, False, True, False, False, False])
+        tr, cal, hid, people = masks(d, eval_people=["2"])
+        self.assertEqual(people, ["2"])
+        self.assertEqual(tr.tolist(), [True, True, True, True, False, False])  # 61 becomes training
+        self.assertEqual(cal.tolist(), [False, False, False, False, True, False])
+        self.assertEqual(hid.tolist(), [False, False, False, False, False, True])
 ```
 
-Note: `fp` here is the packaged EEGNet fingerprint stored in loop B's test banks. The shipped
-filter-bank fingerprint is ≈ oracle (0.996), so the `oracle` column is the shipping-relevant
-number.
+Run: `.venv/bin/python -W ignore -m unittest track2/tests/test_portfolio.py -v`
+Expected: FAIL with `ImportError: cannot import name 'masks'`.
 
-- [ ] **Step 4: Run, analyse, commit results**
+- [ ] **Step 2: Implement `masks` and use it in `main()`**
 
-Run: `OMP_NUM_THREADS=2 .venv/bin/python -W ignore research/expert-portfolio/experiments/checkpoint-1/run.py <λ> <cands>`
-
-Write `analysis.md` applying the ship rule. Commit as
-`research(results): loop C checkpoint 1 — <ship|no ship>`.
-
----
-
-### Task 9: Integrate the shipped streams and pass the contract check offline (only if Task 8 ships)
-
-**Files:**
-- Modify: `track2/train_mixture.py` (flags `--shallow-experts`, `--reve-probe`, `--combiner portfolio`, `--portfolio-coef PATH`)
-- Modify: `track2/README.md`
-- Create: `track2/results/dreyer_sim_seed0_portfolio_reused.md` (written by the script)
-
-**Interfaces:**
-- Consumes:
-  - `stream_bank.train_stream` recipe (ShallowFBCSPNet pooled + fine-tunes on R1–R3);
-  - `reve_parts.*`;
-  - the Task 8 combiner coefficients, dumped to JSON
-    (`PortfolioLogLinear(...).fit(...).describe()` → `{"w": [...], "c": [...], "b": [...]}`).
-- Produces: `outputs/t2-portfolio/package/{submission/, track2_dreyer_sim.zip}`, which passes
-  the contract check.
-
-- [ ] **Step 1: Add packaging to `train_mixture.py`**
-
-After the Riemannian block in `main()`:
+Add to `track2/train_mixture.py` (above `main`):
 ```python
+def masks(d, eval_people=None):
+    """Training / calibration / hidden masks.
+
+    Default (the original simulation): the kit's test people are the evaluation people.
+    sim2 (`eval_people` given): those people are the evaluation people, and every other
+    train- or test-split person is an ordinary training person (all six runs)."""
+    subj, run, split = d["subject"], d["run"], d["split"]
+    if eval_people is None:
+        is_eval = split == "test"
+        train = split == "train"
+    else:
+        is_eval = np.isin(subj, list(eval_people))
+        train = np.isin(split, ["train", "test"]) & ~is_eval
+    calib = is_eval & (run < N_CALIB_RUNS)
+    hidden = is_eval & (run >= N_CALIB_RUNS)
+    people = sorted(np.unique(subj[is_eval]), key=int)
+    return train, calib, hidden, people
+```
+
+In `main()`, replace the lines that build `is_eval`, `calib`, `hidden` and `people` with:
+```python
+    eval_people = (json.loads(Path(args.eval_people).read_text())["people"]
+                   if args.eval_people else None)
+    if eval_people is not None and args.reuse_eegnet:
+        raise SystemExit("--reuse-eegnet experts belong to the original evaluation people")
+    train_mask, calib, hidden, people = masks(d, eval_people)
+```
+Then replace every `(split == "train") | calib` with `train_mask | calib` (the pooled EEGNet's
+data), and log `train_mask.sum()` instead of `(split == 'train').sum()`.
+
+- [ ] **Step 3: Add the stream blocks** (after the Riemannian block)
+
+```python
+    extra_files = []
     if args.shallow_experts:
         log("ShallowFBCSPNet pooled + per-person fine-tunes")
         sys.path.insert(0, str(REPO / "research" / "expert-portfolio" / "src"))
         from stream_bank import train_stream
-        _, sh, _ = train_stream(X, y, (split == "train") | calib, split == "val",
-                                [calib & (subj == s) for s in people], sfreq, args.seed,
-                                args.threads)
+        _, sh, info_sh = train_stream(X, y, train_mask | calib, split == "val",
+                                      [calib & (subj == s) for s in people], sfreq, args.seed,
+                                      args.threads)
         state["shallow_experts"] = [e.state_dict() for e in sh]
         config_extra["shallow_experts"] = True
     if args.reve_probe:
@@ -1677,20 +1712,25 @@ After the Riemannian block in `main()`:
         import reve_parts
         from submission import load_reve_encoder
         pos_dir = REPO / "outputs" / "t2-portfolio" / "reve_positions"
-        enc = load_reve_encoder(pos_dir)
         R = reve_parts.resample_matrix(n_times, sfreq)
         pos = reve_parts.positions(ch_names, pos_dir / "reve_positions.json")
-        pool = (split == "train") | calib
-        Z = reve_parts.embed(enc, X, R, pos)
+        if args.reve_emb_cache:
+            Z = np.load(args.reve_emb_cache)["full"]
+            assert len(Z) == len(X), "embedding cache does not match the windows"
+        else:
+            Z = reve_parts.embed(load_reve_encoder(pos_dir), X, R, pos)
+        pool = train_mask | calib
         mu, sd = Z[pool].mean(0), Z[pool].std(0) + 1e-6
         W0, b0 = reve_parts.fit_head((Z[pool] - mu) / sd, y[pool], n_classes, 1e-3)
         W, b = reve_parts.fit_person_heads((Z[calib] - mu) / sd, y[calib], lab[calib], K,
                                            n_classes, W0, b0, args.reve_lam)
         state["reve"] = reve_parts.export(R, pos, mu, sd, W, b)
         config_extra |= {"reve_probe": True, "reve_n_out": int(R.shape[1])}
-        extra_files = [pos_dir / "reve_positions.json", pos_dir / "reve_kwargs.json"]
+        extra_files += [pos_dir / "reve_positions.json", pos_dir / "reve_kwargs.json"]
     if args.combiner == "portfolio":
         coef = json.loads(Path(args.portfolio_coef).read_text())
+        n_streams = 1 + int(args.shallow_experts) + int(args.reve_probe)
+        assert len(coef["w"]) == n_streams, "coefficients don't match the enabled streams"
         b_full = [0.0, *coef["b"]] if n_classes == 2 else [0.0] * n_classes
         state["combiner"] = {"w": torch.tensor(coef["w"], dtype=torch.float64),
                              "c": torch.tensor(coef["c"], dtype=torch.float64),
@@ -1698,27 +1738,208 @@ After the Riemannian block in `main()`:
                              "rel": state["combiner"]["rel"]}
         config_extra |= {"combiner": "portfolio", "combiner_coef": coef}
 ```
-Copy every path in `extra_files` into `sub_dir` before zipping. Add the argparse flags
-`--shallow-experts`, `--reve-probe`, `--reve-lam` (float, default 0.1),
-`--combiner {C3,portfolio}` and `--portfolio-coef` (path).
+After `sub_dir` is created, copy the extra files:
+`for f in extra_files: shutil.copyfile(f, sub_dir / f.name)`.
 
-The stream order in `PortfolioCombiner.w` is [EEGNet, Shallow, REVE], matching
-`FingerprintMixture.expert_logp`. The JSON `w` must be written in that order: when fitting with
-`PortfolioLogLinear(["eegnet", "shallow", "reve", "ts", "rel"])`, the order matches.
+Add the argparse flags:
+```python
+    ap.add_argument("--eval-people", default=None, help="JSON with a 'people' list (sim2)")
+    ap.add_argument("--shallow-experts", action="store_true")
+    ap.add_argument("--reve-probe", action="store_true")
+    ap.add_argument("--reve-lam", type=float, default=0.1)
+    ap.add_argument("--reve-emb-cache", default=None, help="outputs/t2-portfolio/reve_emb_dreyer.npz")
+    ap.add_argument("--combiner", choices=["C3", "portfolio"], default="C3")
+    ap.add_argument("--portfolio-coef", default=None)
+```
 
-- [ ] **Step 2: Build and score**
+- [ ] **Step 4: Report the two-stream C3 rows next to the portfolio rows**
 
-Run:
+In the scoring section, after `lp_all` is computed, add:
+```python
+    if args.combiner == "portfolio":
+        from submission import LogLinearCombiner
+        c3 = LogLinearCombiner(K, n_classes)
+        c3.coef.copy_(torch.tensor([riemann_parts.C3["a"], riemann_parts.C3["c0"],
+                                    riemann_parts.C3["c1"]], dtype=torch.float64))
+        if n_classes == 2:
+            c3.class_bias[1] = riemann_parts.C3["b"]
+        c3.rel.copy_(mixture.combiner.rel)
+        with torch.inference_mode():
+            lp_c3 = c3(lp_eeg, mixture.riemann(Xt)).double()
+        preds |= {"E+T (C3), oracle": lp_c3[n, true_idx].argmax(1).numpy(),
+                  "E+T (C3), soft": soft(lp_c3)}
+```
+Rename the existing `"+ Riemannian (C3)"` keys to `"full combination"` when
+`args.combiner == "portfolio"`. Extend the results tag:
+```python
+    tag += ("_sim2" if args.eval_people else "") + ("_shallow" if args.shallow_experts else "") \
+        + ("_reve" if args.reve_probe else "") + ("_portfolio" if args.combiner == "portfolio" else "")
+```
+and the output directory default to `args.out / ("sim2" if args.eval_people else "")`.
+
+- [ ] **Step 5: Tests and a smoke run**
+
+Run: `.venv/bin/python -W ignore -m unittest discover -s track2/tests -v`
+Expected: all OK.
+
+Smoke the sim2 path with tiny budgets:
+```bash
+OMP_NUM_THREADS=4 .venv/bin/python -W ignore track2/train_mixture.py --threads 4 --seed 99 \
+    --epochs 1 --ft-epochs 1 \
+    --eval-people research/expert-portfolio/experiments/00-protocol/sim2_people.json \
+    --out outputs/t2-portfolio/smoke
+```
+Expected:
+- the log shows 14 evaluation people;
+- calibration is 14 × 120 = 1,680 windows and hidden is 1,680;
+- the score table prints (numbers are meaningless at 1 epoch).
+
+Delete `outputs/t2-portfolio/smoke` and the smoke results files in `track2/results/`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git branch --show-current
+git add track2/train_mixture.py track2/tests/test_portfolio.py
+git commit -m "train_mixture: package ShallowFBCSPNet / REVE streams with the portfolio combiner; sim2 masks
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 9: Honest confirmation, sim2 (decides nothing) and the R4–R6 report (upper bounds)
+
+Run if Task 7 named at least one shipping stream. Also run the E+T part regardless, because it
+gives the shipped design its first honest Dreyer estimate.
+
+**Files:**
+- Create: `research/expert-portfolio/experiments/02-confirm/protocol.md`
+- Create: `research/expert-portfolio/experiments/02-confirm/r4r6.py`
+- Create: `research/expert-portfolio/experiments/02-confirm/analysis.md`
+
+**Interfaces:**
+- Consumes:
+  - Task 8's `train_mixture.py` flags;
+  - Task 7's coefficients `outputs/t2-portfolio/portfolio_coef.json` (from
+    `PortfolioLogLinear([...]).fit(own(dev, ex), dev["y"]).describe()`, written by Task 7);
+  - loop B's test banks.
+- Produces:
+  - `track2/results/dreyer_sim_seed{0,1,2}_fb_riemann_c3_sim2*_portfolio.{md,json}`;
+  - `02-confirm/results_r4r6.json`.
+
+- [ ] **Step 1: Write and commit the protocol before any sim2 or R4–R6 scoring**
+
+`research/expert-portfolio/experiments/02-confirm/protocol.md`:
+```markdown
+# Protocol 02: honest confirmation (sim2) and the R4–R6 report
+
+Locked before any sim2 model is trained.
+
+- **Streams shipped by Task 7:** <list>. Combiner coefficients: `outputs/t2-portfolio/portfolio_coef.json`
+  (fitted on the dev bank), transferred unchanged.
+- **sim2:**
+  - The people in `00-protocol/sim2_people.json`; seeds 0, 1, 2.
+  - The full pipeline is trained from scratch (`train_mixture.py --eval-people …
+    --shallow-experts/--reve-probe … --combiner portfolio`).
+  - Reported rows: EEGNet experts, E+T (C3), and the full combination, under oracle and
+    soft routing.
+- **R4–R6:** seeds 0–2 (loop B's test banks plus this loop's test banks); E+T vs the full
+  combination, oracle. **Upper bounds.**
+- **Veto (the only decision here):** withdraw a stream if the full combination is more than 0.02
+  below E+T on sim2 (mean over seeds) or on R4–R6 (mean over seeds).
+- Everything else is reported, not acted on.
+```
+Commit it as `research(protocol): loop C protocol 02 — sim2 confirmation and R4–R6 report`.
+
+- [ ] **Step 2: Run sim2, seeds 0–2, in the background**
+
+Run one seed at a time, about 3 h each. With the REVE cache present, embedding is skipped.
+```bash
+for s in 0 1 2; do
+  OMP_NUM_THREADS=4 .venv/bin/python -W ignore track2/train_mixture.py --threads 4 --seed $s \
+      --eval-people research/expert-portfolio/experiments/00-protocol/sim2_people.json \
+      <--shallow-experts> <--reve-probe --reve-lam λ --reve-emb-cache outputs/t2-portfolio/reve_emb_dreyer.npz> \
+      --combiner portfolio --portfolio-coef outputs/t2-portfolio/portfolio_coef.json \
+      --out outputs/t2-portfolio/sim2_seed$s
+done > outputs/t2-portfolio/logs/sim2.log 2>&1
+```
+Launch the loop itself with `setsid nohup bash -c '…' < /dev/null &`.
+
+- [ ] **Step 3: The R4–R6 report**
+
+`research/expert-portfolio/experiments/02-confirm/r4r6.py`:
+```python
+"""Report-only: E+T vs the full combination on R4–R6, seeds 0–2 (upper bounds)."""
+import json, sys
+from pathlib import Path
+import numpy as np
+REPO = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(REPO / "research" / "expert-portfolio" / "src"))
+from portfolio import LOOPB, OUT, PortfolioLogLinear, bal, dev_bank, nll, own  # noqa: E402
+
+LAM = float(sys.argv[1]); STREAMS = sys.argv[2].split(",")       # e.g. 0.1 shallow,reve
+dev = dev_bank(LAM)
+c = np.load(LOOPB / "classical_xfit_ts_C0.1.npz")
+res = {}
+for seed, name in [(0, "bank_test_packaged.npz"), (1, "bank_test_seed1.npz"), (2, "bank_test_seed2.npz")]:
+    t = dict(np.load(LOOPB / name, allow_pickle=True))
+    t["ts"] = np.load(LOOPB / "classical_test_ts_C0.1.npy")
+    t["rel"] = np.broadcast_to(c["rel_test"][None, :, None], t["eegnet"].shape[:2] + (1,)).copy()
+    if "shallow" in STREAMS:
+        t["shallow"] = np.load(OUT / f"bank_test_shallow_seed{seed}.npz")["shallow"]
+    if "reve" in STREAMS:
+        t["reve"] = np.load(OUT / f"bank_test_reve_lam{LAM}.npz")["reve"]
+    row = {}
+    for label, neural in {"E+T": ["eegnet"], "full": ["eegnet", *STREAMS]}.items():
+        ex = [*neural, "ts", "rel"]
+        lp = PortfolioLogLinear(ex).fit(own(dev, ex), dev["y"]).predict(own(t, ex))
+        row[label] = {"oracle": bal(t["y"], lp), "nll": nll(lp, t["y"])}
+    res[seed] = row
+(Path(__file__).parent / "results_r4r6.json").write_text(json.dumps(res, indent=2))
+print(json.dumps(res, indent=2))
+```
+
+Before running it, generate this loop's test banks:
+- `stream_bank.py dreyer --stream shallow --bank test --seed {0,1,2}`;
+- `stream_bank.py dreyer --stream reve --bank test`.
+
+Then run: `.venv/bin/python -W ignore research/expert-portfolio/experiments/02-confirm/r4r6.py <λ> <streams>`
+
+- [ ] **Step 4: Apply the veto and write `analysis.md`**
+
+Collect from the sim2 result JSONs (`scores["E+T (C3), oracle"]`, `scores["full combination, oracle"]`)
+and `results_r4r6.json`:
+- per seed and the mean;
+- the veto outcome;
+- **the honest Dreyer estimates:** sim2 E+T and full, labelled as such. R4–R6 rows are labelled
+  "upper bound".
+
+Commit as `research(results): loop C protocol 02 — sim2 <numbers>; R4–R6 upper bounds; veto <none|stream>`.
+
+---
+
+### Task 10: Package the shipped streams and pass the contract check offline
+
+Run if Task 9 left at least one stream un-vetoed.
+
+**Files:**
+- Modify: `track2/README.md`
+- Create: `track2/results/dreyer_sim_seed0_*_portfolio.md` (written by `train_mixture.py`)
+
+- [ ] **Step 1: Build the original-simulation package (seed 0, packaged EEGNet experts reused)**
+
 ```bash
 OMP_NUM_THREADS=4 .venv/bin/python -W ignore track2/train_mixture.py --threads 4 \
     --reuse-eegnet outputs/track2_dreyer_sim/submission/mixture.pt \
-    --out outputs/t2-portfolio/package <--shallow-experts> <--reve-probe --reve-lam λ> \
+    --out outputs/t2-portfolio/package <--shallow-experts> \
+    <--reve-probe --reve-lam λ --reve-emb-cache outputs/t2-portfolio/reve_emb_dreyer.npz> \
     --combiner portfolio --portfolio-coef outputs/t2-portfolio/portfolio_coef.json
 ```
-Expected: the `shipped mixture (predict)` row equals the checkpoint's seed-0 full-combination
-oracle value within 0.002.
+Expected: `shipped mixture (predict)` equals `full combination, soft` exactly, and is within 0.002
+of `full combination, oracle` (fingerprint 0.996).
 
-- [ ] **Step 3: Contract check, offline**
+- [ ] **Step 2: Contract check, offline**
 
 ```bash
 U=$PWD/outputs/t2-portfolio/package/unzipped; rm -rf $U; mkdir -p $U
@@ -1731,19 +1952,22 @@ COMPET_SUBMISSION_DIR=$U ../../.venv/bin/benchopt run tracks/bci_decoding \
 ```
 Expected: exit 0, `FingerprintMixture: done`. Record the wall time and ZIP size.
 
-- [ ] **Step 4: Update `track2/README.md`**
+- [ ] **Step 3: Update `track2/README.md`**
 
-- Current best model: add a step 7 with the stream(s) and coefficients.
-- Evidence table: dev, BNCI and checkpoint rows.
-- Contract row: time, ZIP size, `HF_HUB_OFFLINE=1`.
-- Files table: `models.py`, `reve_parts.py`, `tests/`.
-- Before the sealed phase: Rule 04 declaration of REVE (pretraining data: 92 datasets, 60k
-  hours; frozen; staged on the worker).
-- Before the sealed phase: report the sizes at 500 Hz, 4 s (computed, not guessed):
-  `reve_parts.resample_matrix(2000, 500.0).nbytes` (float32 in the package) and the shipped
-  ShallowFBCSPNet state size per person at `sfreq=500`.
+- **Current best model:** a step 7 for the shipped stream(s), with their coefficients.
+- **Evidence table:**
+  - dev bank (drop-one), BNCI (condition (b)) and **sim2 (honest)** rows;
+  - R4–R6 rows marked "upper bound (reused hidden runs)";
+  - the existing loop A/B R4–R6 rows get the same marker.
+- **Contract row:** time, ZIP size, `HF_HUB_OFFLINE=1`.
+- **Files table:** `models.py`, `reve_parts.py`, `tests/`.
+- **Before the sealed phase:**
+  - Rule 04 declaration of REVE (pretraining data: 92 datasets, 60k hours; frozen; staged on
+    the worker);
+  - the sizes at 500 Hz, 4 s, computed: `reve_parts.resample_matrix(2000, 500.0).nbytes`
+    (float32 in the package) and the ShallowFBCSPNet state size per person at `sfreq=500`.
 
-- [ ] **Step 5: Run all tests and commit**
+- [ ] **Step 4: Tests and commit**
 
 ```bash
 .venv/bin/python -W ignore -m unittest discover -s track2/tests -v
@@ -1756,9 +1980,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 10: Leakage-free benchopt comparison page
+### Task 11: Leakage-free benchopt comparison page
 
-Independent of Tasks 8–9; needs Tasks 3–5.
+Independent of Tasks 7–10; needs Tasks 3–6 (REVE embeddings from Task 6).
 
 **Files:**
 - Create: `track2/bench/shallow_solver.py`
@@ -1969,7 +2193,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 11: Findings, report, PR
+### Task 12: Findings, report, PR
 
 **Files:**
 - Modify: `research/expert-portfolio/{findings.md, research-log.md, research-state.yaml}`
