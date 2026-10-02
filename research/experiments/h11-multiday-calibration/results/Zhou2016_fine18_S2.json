@@ -1,0 +1,26 @@
+{
+  "metrics": {
+    "bal_acc": 0.875,
+    "nll": 0.29636292283005,
+    "p_true": 0.8293909561464491,
+    "ece": 0.041359590117892746,
+    "top3": 1.0,
+    "worst_person_recall": 0.52,
+    "per_person_recall": [
+      0.98,
+      1.0,
+      1.0,
+      0.52
+    ]
+  },
+  "dataset": "Zhou2016",
+  "bank": "fine18",
+  "arm": "S2",
+  "n_train": 586,
+  "test_people": [
+    0,
+    1,
+    2,
+    3
+  ]
+}

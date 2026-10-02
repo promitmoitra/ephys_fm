@@ -1,0 +1,18 @@
+{
+  "float64": {
+    "max_abs_dp": 2.5106719425682655e-07,
+    "argmax_agree": 1.0,
+    "bal_acc_ref": 1.0,
+    "bal_acc_torch": 1.0,
+    "infer_s_840": 4.21,
+    "state_mb": 11.28
+  },
+  "float32": {
+    "max_abs_dp": 3.892525265447588e-06,
+    "argmax_agree": 1.0,
+    "bal_acc_ref": 1.0,
+    "bal_acc_torch": 1.0,
+    "infer_s_840": 2.33,
+    "state_mb": 5.74
+  }
+}

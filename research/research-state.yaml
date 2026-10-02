@@ -1,0 +1,109 @@
+# Loop A (Track 2): per-window fingerprint model. Brief: docs/handoff/track2-research-loops.md
+
+project:
+  title: "Track 2 loop A: a better per-window fingerprint for soft routing"
+  question: >
+    Which per-window person-ID model gives the most accurate and best-calibrated p(person | window)
+    for the 21 Dreyer evaluation people, so that soft routing keeps more of the oracle-ID gain?
+  status: concluded
+  started: "2026-09-30"
+  domain: "EEG biometrics / BCI decoding (Track 2)"
+  worktree: ".claude/worktrees/t2-fingerprint"
+  branch: "exp/fingerprint-model"
+  artifacts: "outputs/t2-fingerprint/"
+
+evaluation:
+  inner_loop: "train R1-R2 (1,680 windows), test R3 (840); 21-way balanced accuracy + NLL; fixed epoch budget, last epoch"
+  secondary: "p_true (mean mass on true person), ECE, top-3, worst-person recall"
+  confirmation: >
+    retrain on R1-R3, score R4-R6: fingerprint accuracy + soft-routed mixture with the fixed EEGNet
+    experts of outputs/track2_dreyer_sim/submission/mixture.pt (baseline 0.744 / 0.901); 3 seeds.
+    Only at outer-loop checkpoints, for pre-registered candidates. External check: BNCI cross-session.
+  never: "use R4-R6 for any decision"
+
+literature:
+  key_papers: []
+  open_problems: []
+
+hypotheses:
+  - id: H0
+    statement: "Baseline re-measurement: EEGNet, 150 epochs fixed, last epoch"
+    status: done
+    result: "R3 0.745 +- 0.10, NLL 1.34"
+    priority: high
+  - id: H1
+    statement: "Train on all of R1-R3 with a fixed budget (50% more data per person) -> better hidden-run fingerprint"
+    status: pending
+    priority: medium
+    note: "Only testable at confirmation (R3 is the dev set); test via a drift-matched proxy: R1 -> R3 vs R1-R2 -> R3"
+  - id: H2
+    statement: "Pretrain the trunk on 52/66 pool identities, fine-tune on the 21 -> features that generalize across runs"
+    status: deprioritized
+    priority: low
+    note: "EEGNet-only idea; ts_fb already at ceiling on Dreyer"
+  - id: H3
+    statement: "Riemannian fingerprint (tangent space + LR, broadband and filter bank) >= 0.90 within session"
+    status: supported
+    result: "ts_fb_C1: R3 1.000; R4-R6 0.996 (confirm-1); BNCI cross-day 0.974"
+    priority: high
+  - id: H4
+    statement: "Temperature scaling on a held-out calibration run improves NLL at equal accuracy"
+    status: pending
+    priority: low
+    note: "ts_fb ECE already 0.013-0.046; revisit only for cross-day NLL"
+  - id: H5
+    statement: "Augmentation for run-to-run drift (channel dropout, amplitude scaling, time shift, noise)"
+    status: pending
+    priority: medium
+  - id: H3.1
+    statement: "Covariance fingerprints survive run distance (Dreyer) and days (BNCI)"
+    status: supported
+    result: "ts_fb R1->R3 1.000; BNCI cross-day 0.974 vs broadband 0.872"
+  - id: H3.2
+    statement: "Which bands carry stable identity (alpha predicted best cross-day)"
+    status: supported
+    result: "8-13 Hz alone 0.975 cross-day; 1-4 Hz 0.710 (day-specific)"
+  - id: H3.3
+    statement: "Finer filter banks improve cross-day ID"
+    status: refuted
+    result: "won on BNCI2014, lost on held-out BNCI2015_001 and Zhou2016; fb6 stays"
+  - id: H11
+    statement: "Calibrating on more days makes cross-day ID robust"
+    status: supported
+    result: "2 days -> day 3: BNCI2015_001 1.000, Zhou2016 0.975 (1 day 0.935 / 0.790); data-matched similar"
+  - id: H12
+    statement: "Channel count explains the held-out cross-day gap"
+    status: refuted
+    result: "BNCI2014 13 ch 0.971 vs 22 ch 0.974; matters for 21-way Dreyer (6 ch 0.869 -> 27 ch 1.000)"
+  - id: H6
+    statement: "EEGNet + ts_fb equal-weight ensembles (D1, D2)"
+    status: refuted
+  - id: H9
+    statement: "Pure-torch export of ts_fb_C1 reproduces sklearn"
+    status: supported
+    result: "max |dp| 3.9e-6 float32, argmax identical, 5.7 MB"
+
+experiments:
+  proxy_metric: "R3 21-way balanced accuracy and NLL (train R1-R2); saturated -> drift benchmarks D1 (Dreyer R1->R3) and D2 (BNCI cross-day)"
+  baseline_value: "EEGNet shipped recipe: R3 0.857 (biased, best epoch on R3); R4-R6 0.744"
+  best_value: "ts_fb_C1: R3 1.000 / NLL 0.027; R4-R6 0.996 (confirm-1); BNCI cross-day 0.974 / NLL 0.071"
+  total_runs: 30
+  trajectory:
+    - {run_id: h3_ts_broad_C1, metric: "R3 0.987 / 0.107"}
+    - {run_id: h3_ts_fb_C1, metric: "R3 1.000 / 0.027"}
+    - {run_id: h3.1_D2_ts_broad, metric: "BNCI 0.872 / 0.403"}
+    - {run_id: h3.1_D2_ts_fb, metric: "BNCI 0.974 / 0.071"}
+    - {run_id: confirm-1_ts_fb, metric: "R4-R6 0.996 / 0.044; mixture 0.907 (oracle 0.9075)"}
+
+outer_loop:
+  cycle: 3
+  last_direction: conclude
+  last_reflection: "Conclude: fb6 covariance fingerprint confirmed (R4-R6 0.996, mixture = oracle), mechanism (alpha/beta stable, delta day-specific), cross-day lever = multi-day calibration. Deliverable: research/src/torch_fp.py; integration into submission.py is the handoff's next step."
+
+workspace:
+  findings: "research/findings.md"
+  log: "research/research-log.md"
+  literature_dir: "research/literature/"
+  experiments_dir: "research/experiments/"
+  to_human_dir: "research/to_human/"
+  shared_code: "research/src/ (fp.py harness, riemann.py)"
