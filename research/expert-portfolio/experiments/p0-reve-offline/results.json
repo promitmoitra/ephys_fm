@@ -1,0 +1,23 @@
+{
+  "plain_call_error": "ValueError: n_outputs not specified.",
+  "constructor_kwargs": {
+    "n_outputs": 2,
+    "n_chans": 27,
+    "n_times": 800,
+    "sfreq": 200
+  },
+  "download_s": 144.6,
+  "n_params": 69410306,
+  "positions_file": true,
+  "offline_load": "ok",
+  "dreyer_missing_channels": [],
+  "bnci_missing_channels": [],
+  "features_shape": [
+    2,
+    27,
+    4,
+    512
+  ],
+  "embed_s_per_1000": 96.7,
+  "est_dreyer_all_min": 33.5
+}
