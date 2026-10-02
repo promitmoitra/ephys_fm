@@ -11,12 +11,20 @@ Dreyer has one session of six runs per subject, so:
       calibration      their runs R1-R3 (labeled, used for training)
       hidden test      their runs R4-R6 (scored here)
 
-Pipeline (the design validated in experiments/fingerprint_tangermann):
+Pipeline (track2/README.md, "Current best model"):
   1. pooled EEGNet on training pool + all calibration runs
-  2. fingerprint EEGNet (21-way) on calibration R1-R2, epoch picked on R3
+  2. fingerprint: filter-bank covariance model on all calibration runs
+     (loop A; default), or the older EEGNet fingerprint (21-way, R1-R2,
+     epoch picked on R3)
   3. one whole-network fine-tune of the pooled model per evaluation person on
      their R1-R3 (lr 1e-4, 50 epochs, last epoch)
-  4. score on R4-R6 through submission.py's own code path, and package
+  4. per-person Riemannian experts on R1-R3 and their calibration reliability,
+     combined with the EEGNet experts in log space (loop B, combiner C3)
+  5. score on R4-R6 through submission.py's own code path, and package
+
+--reuse-eegnet PATH skips steps 1 and 3 and loads the EEGNet experts from an
+existing mixture.pt (e.g. the seed-0 package), so a new fingerprint or
+combiner can be packaged and scored against the same experts.
 
 The packaged ZIP uses test subjects' labeled runs, so it must NOT be uploaded
 to the warm-up leaderboard (inflated, leaky score). It exists to validate
@@ -24,6 +32,7 @@ the design and the submission contract.
 
 Usage (repo root, venv active; Dreyer prepared under data/neural_compet):
     python track2/train_mixture.py [--seed 0] [--epochs 100]
+    python track2/train_mixture.py --reuse-eegnet PATH/mixture.pt --out DIR
 """
 
 import argparse
@@ -45,6 +54,7 @@ DATA = REPO / "data"
 sys.path[:0] = [str(KIT), str(Path(__file__).resolve().parent)]
 
 from submission import build_model  # noqa: E402  (the shipped code path)
+import riemann_parts  # noqa: E402
 
 CACHE = DATA / "experiments" / "dreyer_windows.npz"
 OUT = REPO / "outputs" / "track2_dreyer_sim"
@@ -148,9 +158,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--epochs", type=int, default=100, help="pooled model")
-    ap.add_argument("--fp-epochs", type=int, default=150, help="fingerprint")
+    ap.add_argument("--fp-epochs", type=int, default=150, help="EEGNet fingerprint")
     ap.add_argument("--ft-epochs", type=int, default=50, help="per-person")
     ap.add_argument("--threads", type=int, default=8)
+    ap.add_argument("--fingerprint", choices=["fb_riemann", "eegnet"], default="fb_riemann")
+    ap.add_argument("--no-riemann-experts", action="store_true")
+    ap.add_argument("--reuse-eegnet", type=Path, default=None,
+                    help="mixture.pt whose EEGNet experts (and EEGNet fingerprint) to reuse")
+    ap.add_argument("--out", type=Path, default=OUT)
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
     t_start = time.time()
@@ -159,6 +174,7 @@ def main():
     d = load_windows()
     X, y, subj, run, split = d["X"], d["y"], d["subject"], d["run"], d["split"]
     ch_names = [str(c) for c in d["ch_names"]]
+    sfreq = float(d["sfreq"])
     n_chans, n_times = X.shape[1:]
     n_classes = int(y.max()) + 1
     is_eval = split == "test"
@@ -167,58 +183,90 @@ def main():
     people = sorted(np.unique(subj[is_eval]), key=int)
     K = len(people)
     s_idx = {s: i for i, s in enumerate(people)}
+    lab = np.array([s_idx.get(s, -1) for s in subj])
     log(f"X {X.shape}, {n_classes} classes, {K} evaluation people; windows: "
         f"pool {int((split == 'train').sum())} + calib {int(calib.sum())}, "
         f"val {int((split == 'val').sum())}, hidden test {int(hidden.sum())}")
 
-    # 1. pooled model: training pool + calibration runs
-    pool = (split == "train") | calib
-    val = split == "val"
-    log("1/3 pooled EEGNet")
-    pooled, info_pooled = fit(
-        make_eegnet(n_chans, n_classes, n_times), X[pool], y[pool], lr=1e-3,
-        epochs=args.epochs, seed=args.seed, bs=64, X_val=X[val], y_val=y[val],
-        name="pooled")
+    import copy
+    pooled = control = info_pooled = reused = None
+    if args.reuse_eegnet:
+        reused = torch.load(args.reuse_eegnet, map_location="cpu", weights_only=True)
+        experts = []
+        for sd in reused["experts"]:
+            e = make_eegnet(n_chans, n_classes, n_times)
+            e.load_state_dict(sd)
+            experts.append(e)
+        log(f"reusing {len(experts)} EEGNet experts from {args.reuse_eegnet}")
+    else:
+        # 1. pooled model: training pool + calibration runs
+        pool = (split == "train") | calib
+        val = split == "val"
+        log("pooled EEGNet")
+        pooled, info_pooled = fit(
+            make_eegnet(n_chans, n_classes, n_times), X[pool], y[pool], lr=1e-3,
+            epochs=args.epochs, seed=args.seed, bs=64, X_val=X[val], y_val=y[val],
+            name="pooled")
+        # 3. per-person fine-tunes, plus the epoch-matched control
+        log(f"per-person fine-tunes ({K}) and control")
+        control, _ = fit(copy.deepcopy(pooled), X[calib], y[calib], lr=1e-4,
+                         epochs=args.ft_epochs, seed=args.seed, bs=32)
+        experts = []
+        for s in people:
+            m = calib & (subj == s)
+            expert, _ = fit(copy.deepcopy(pooled), X[m], y[m], lr=1e-4,
+                            epochs=args.ft_epochs, seed=args.seed, bs=32)
+            experts.append(expert)
 
     # 2. fingerprint: who is this (among the evaluation people)?
-    log("2/3 fingerprint EEGNet")
-    fp_tr = calib & (run < N_CALIB_RUNS - 1)
-    fp_va = calib & (run == N_CALIB_RUNS - 1)
-    lab = np.array([s_idx.get(s, -1) for s in subj])
-    fingerprint, info_fp = fit(
-        make_eegnet(n_chans, K, n_times), X[fp_tr], lab[fp_tr], lr=1e-3,
-        epochs=args.fp_epochs, seed=args.seed, bs=64, X_val=X[fp_va],
-        y_val=lab[fp_va], name="fingerprint", log_every=25)
+    if args.fingerprint == "fb_riemann":
+        log("fingerprint: filter-bank covariance model on all calibration runs")
+        fp_state = riemann_parts.fit_fingerprint(X[calib], lab[calib], sfreq)
+        info_fp = {"kind": "fb_riemann", "bands": riemann_parts.FP_BANDS}
+    elif reused is not None:
+        fp_state = reused["fingerprint"]
+        info_fp = {"kind": "eegnet", "reused": str(args.reuse_eegnet)}
+    else:
+        log("fingerprint EEGNet")
+        fp_tr = calib & (run < N_CALIB_RUNS - 1)
+        fp_va = calib & (run == N_CALIB_RUNS - 1)
+        fingerprint, info_fp = fit(
+            make_eegnet(n_chans, K, n_times), X[fp_tr], lab[fp_tr], lr=1e-3,
+            epochs=args.fp_epochs, seed=args.seed, bs=64, X_val=X[fp_va],
+            y_val=lab[fp_va], name="fingerprint", log_every=25)
+        fp_state = fingerprint.state_dict()
+        info_fp["kind"] = "eegnet"
 
-    # 3. per-person fine-tunes, plus the epoch-matched control
-    import copy
-    log(f"3/3 per-person fine-tunes ({K}) and control")
-    control, _ = fit(copy.deepcopy(pooled), X[calib], y[calib], lr=1e-4,
-                     epochs=args.ft_epochs, seed=args.seed, bs=32)
-    experts = []
-    for s in people:
-        m = calib & (subj == s)
-        expert, _ = fit(copy.deepcopy(pooled), X[m], y[m], lr=1e-4,
-                        epochs=args.ft_epochs, seed=args.seed, bs=32)
-        experts.append(expert)
+    # 4. per-person Riemannian experts + combiner
+    state = {"fingerprint": fp_state, "experts": [e.state_dict() for e in experts]}
+    config_extra = {"fingerprint": args.fingerprint,
+                    "fingerprint_n_bands": len(riemann_parts.FP_BANDS),
+                    "riemann_experts": not args.no_riemann_experts}
+    rel = None
+    if not args.no_riemann_experts:
+        log("per-person Riemannian experts and calibration reliability")
+        state["riemann"], state["combiner"], rel, n_out = riemann_parts.fit_riemann(
+            X[calib], y[calib], lab[calib], run[calib], K, n_classes, sfreq)
+        config_extra |= {"riemann_n_times_out": int(n_out), "combiner": "C3",
+                         "combiner_coef": riemann_parts.C3}
 
     # Package: the exact files a Codabench upload would contain
-    sub_dir = OUT / "submission"
+    sub_dir = args.out / "submission"
     if sub_dir.exists():
         shutil.rmtree(sub_dir)
     sub_dir.mkdir(parents=True)
     shutil.copyfile(Path(__file__).resolve().parent / "submission.py",
                     sub_dir / "submission.py")
-    torch.save({"fingerprint": fingerprint.state_dict(),
-                "experts": [e.state_dict() for e in experts]},
-               sub_dir / "mixture.pt")
+    torch.save(state, sub_dir / "mixture.pt")
     config = {"ch_names": ch_names, "n_times": int(n_times),
-              "n_classes": n_classes, "sfreq": float(d["sfreq"]),
+              "n_classes": n_classes, "sfreq": sfreq,
               "experts": [f"Dreyer2023Large/{s}" for s in people],
+              **config_extra,
               "trained_on": "Dreyer 2023 sealed-phase simulation (NOT for warm-up upload)",
-              "seed": args.seed}
+              "seed": args.seed,
+              "eegnet_experts": str(args.reuse_eegnet) if args.reuse_eegnet else "trained"}
     (sub_dir / "config.json").write_text(json.dumps(config, indent=2))
-    zip_path = OUT / "track2_dreyer_sim.zip"
+    zip_path = args.out / "track2_dreyer_sim.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(sub_dir.iterdir()):
             z.write(f, arcname=f.name)  # files at the ZIP root
@@ -235,17 +283,28 @@ def main():
                        for i in range(0, len(Xh), 256)]).numpy()
     infer_s = time.time() - t0
     with torch.inference_mode():
-        p_subj = torch.softmax(logits(fingerprint, Xh), 1)
-        p_cls = torch.stack([torch.softmax(logits(e, Xh), 1) for e in experts], 1)
+        Xt = torch.from_numpy(Xh)
+        p_subj = torch.softmax(mixture.fingerprint(Xt), 1).double()
+        lp_eeg = torch.stack([torch.log_softmax(e(Xt), 1) for e in mixture.experts],
+                             1).double()
+        lp_all = torch.cat([mixture.expert_logp(Xt[i:i + 256])
+                            for i in range(0, len(Xt), 256)]).double()
     n = torch.arange(len(Xh))
     true_idx = torch.as_tensor([s_idx[s] for s in sh])
-    preds = {
-        "pooled": logits(pooled, Xh).argmax(1).numpy(),
-        "control": logits(control, Xh).argmax(1).numpy(),
-        "oracle": p_cls[n, true_idx].argmax(1).numpy(),
-        "soft (shipped mixture)": p_mix,
-        "hard": p_cls[n, p_subj.argmax(1)].argmax(1).numpy(),
-    }
+
+    def soft(lp):
+        return (p_subj[:, :, None] * lp.exp()).sum(1).argmax(1).numpy()
+
+    preds = {}
+    if pooled is not None:
+        preds["pooled"] = logits(pooled, Xh).argmax(1).numpy()
+        preds["control"] = logits(control, Xh).argmax(1).numpy()
+    preds |= {"EEGNet experts, oracle": lp_eeg[n, true_idx].argmax(1).numpy(),
+              "EEGNet experts, soft": soft(lp_eeg)}
+    if not args.no_riemann_experts:
+        preds |= {"+ Riemannian (C3), oracle": lp_all[n, true_idx].argmax(1).numpy(),
+                  "+ Riemannian (C3), soft": soft(lp_all)}
+    preds["shipped mixture (predict)"] = p_mix
     fp_acc = bal_acc(true_idx.numpy(), p_subj.argmax(1).numpy())
     scores = {}
     for name, p in preds.items():
@@ -253,36 +312,43 @@ def main():
         scores[name] = {"bal_acc": bal_acc(yh, p),
                         "mean_over_people": float(np.mean(per)),
                         "per_person": dict(zip(people, map(float, per)))}
-    result = {"args": vars(args), "fingerprint_bal_acc": fp_acc,
+    result = {"args": {k: str(v) for k, v in vars(args).items()},
+              "fingerprint_bal_acc": fp_acc,
               "pooled": info_pooled, "fingerprint": info_fp,
+              "riemann_reliability": None if rel is None else dict(zip(people, rel.tolist())),
               "inference_s_hidden_windows": round(infer_s, 2),
               "n_hidden_windows": int(len(Xh)), "scores": scores,
               "zip_mb": round(zip_path.stat().st_size / 1e6, 3),
               "runtime_s": round(time.time() - t_start, 1)}
     RESULTS.mkdir(exist_ok=True)
-    tag = f"dreyer_sim_seed{args.seed}"
+    tag = (f"dreyer_sim_seed{args.seed}_{args.fingerprint}"
+           f"{'' if args.no_riemann_experts else '_c3'}"
+           f"{'_reused' if args.reuse_eegnet else ''}")
     (RESULTS / f"{tag}.json").write_text(json.dumps(result, indent=2))
     (RESULTS / f"{tag}.md").write_text(render(result, K))
     print(render(result, K), flush=True)
 
 
 def render(r, K):
-    lines = ["# Track 2 prototype: fingerprint mixture on Dreyer 2023 (sealed-phase simulation)\n",
+    a = r["args"]
+    experts = ("reused from `" + a["reuse_eegnet"] + "`" if a["reuse_eegnet"] != "None"
+               else "trained")
+    riemann = "off" if a["no_riemann_experts"] == "True" else "on (combiner C3)"
+    lines = ["# Track 2: fingerprint mixture on Dreyer 2023 (sealed-phase simulation)\n",
              f"{K} evaluation people (subjects 61–81); calibration = runs R1–R3, "
              f"hidden test = R4–R6 ({r['n_hidden_windows']} windows). 2-class MI, "
-             "chance 0.5. Seed "
-             f"{r['args']['seed']}. Fingerprint (21-way) on hidden runs: "
-             f"{r['fingerprint_bal_acc']:.3f} (chance {1 / K:.3f}).\n",
+             f"chance 0.5. Seed {a['seed']}. Fingerprint `{a['fingerprint']}`: "
+             f"{r['fingerprint_bal_acc']:.3f} 21-way on the hidden runs (chance "
+             f"{1 / K:.3f}). Riemannian experts {riemann}. EEGNet experts {experts}.\n",
              "| Model | Balanced acc (windows) | Mean over people |", "|---|---|---|"]
     for name, s in r["scores"].items():
         lines.append(f"| {name} | {s['bal_acc']:.3f} | {s['mean_over_people']:.3f} |")
-    lines += ["", f"`control` = pooled model fine-tuned on all calibration runs with the "
-              "same recipe as the experts (epoch-matched). The soft row is computed by "
-              "reloading the packaged `submission.py` + `mixture.pt` + `config.json`. "
-              f"Inference on {r['n_hidden_windows']} windows (CPU): "
+    lines += ["", "`soft` rows mix the per-person experts by the packaged fingerprint's "
+              "p(person | window); `oracle` rows use the true person. The last row runs "
+              "the packaged `submission.py` + `mixture.pt` + `config.json` through "
+              f"`predict`. Inference on {r['n_hidden_windows']} windows (CPU): "
               f"{r['inference_s_hidden_windows']} s. ZIP: {r['zip_mb']} MB. "
-              f"Pooled best epoch {r['pooled']['best_epoch']}, fingerprint best epoch "
-              f"{r['fingerprint']['best_epoch']}. Runtime {r['runtime_s']} s."]
+              f"Runtime {r['runtime_s']} s."]
     return "\n".join(lines) + "\n"
 
 
