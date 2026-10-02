@@ -183,7 +183,9 @@ def load_reve_encoder(positions_dir, _constructor=None):
         kwargs = json.loads(kw_file.read_text()) if kw_file.exists() else {}
 
         def _constructor():
-            return REVE.from_pretrained("brain-bzh/reve-base", **kwargs)
+            # local_files_only: huggingface_hub reads HF_HUB_OFFLINE once at import (before
+            # this function runs), so the env var alone would not stop network attempts.
+            return REVE.from_pretrained("brain-bzh/reve-base", local_files_only=True, **kwargs)
     enc = _constructor().eval()
     for p in enc.parameters():
         p.requires_grad_(False)

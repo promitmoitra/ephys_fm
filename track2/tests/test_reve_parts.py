@@ -91,6 +91,20 @@ class TestReveParts(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "weight"):
             probe.load_state_dict(state)
 
+    def test_load_encoder_never_touches_the_network(self):
+        """huggingface_hub reads HF_HUB_OFFLINE at import time, so setting it later is not
+        enough: from_pretrained itself must be told local_files_only=True."""
+        from unittest import mock
+        from braindecode.models import REVE
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "reve_kwargs.json").write_text(json.dumps({"n_outputs": 2}))
+            with mock.patch.object(REVE, "from_pretrained",
+                                   return_value=torch.nn.Identity()) as fp:
+                load_reve_encoder(Path(tmp))
+            kwargs = fp.call_args.kwargs
+            self.assertTrue(kwargs.get("local_files_only"))
+            self.assertEqual(kwargs.get("n_outputs"), 2)
+
     def test_load_encoder_sets_offline_env(self):
         with tempfile.TemporaryDirectory() as tmp:
             os.environ.pop("HF_HUB_OFFLINE", None)
