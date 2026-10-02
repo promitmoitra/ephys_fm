@@ -77,6 +77,22 @@ class TestPortfolio(unittest.TestCase):
             self.assertEqual([p.shape for p in a.parameters()],
                              [p.shape for p in b.parameters()], sf)
 
+    def test_masks_default_and_sim2(self):
+        import numpy as np
+        from train_mixture import masks
+        d = {"subject": np.array(["1", "1", "61", "61", "2", "2"]),
+             "run": np.array([0, 4, 0, 4, 1, 5]),
+             "split": np.array(["train", "train", "test", "test", "train", "train"])}
+        tr, cal, hid, people = masks(d)
+        self.assertEqual(people, ["61"])
+        self.assertEqual(tr.tolist(), [True, True, False, False, True, True])
+        self.assertEqual(cal.tolist(), [False, False, True, False, False, False])
+        tr, cal, hid, people = masks(d, eval_people=["2"])
+        self.assertEqual(people, ["2"])
+        self.assertEqual(tr.tolist(), [True, True, True, True, False, False])  # 61 becomes training
+        self.assertEqual(cal.tolist(), [False, False, False, False, True, False])
+        self.assertEqual(hid.tolist(), [False, False, False, False, False, True])
+
 
 if __name__ == "__main__":
     unittest.main()

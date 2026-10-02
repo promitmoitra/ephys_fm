@@ -154,6 +154,25 @@ def fit(model, X, y, *, lr, epochs, seed, bs, X_val=None, y_val=None,
     return model, {"best_val": best, "best_epoch": best_epoch + 1}
 
 
+def masks(d, eval_people=None):
+    """Training / calibration / hidden masks.
+
+    Default (the original simulation): the kit's test people are the evaluation people.
+    sim2 (`eval_people` given): those people are the evaluation people, and every other
+    train- or test-split person is an ordinary training person (all six runs)."""
+    subj, run, split = d["subject"], d["run"], d["split"]
+    if eval_people is None:
+        is_eval = split == "test"
+        train = split == "train"
+    else:
+        is_eval = np.isin(subj, list(eval_people))
+        train = np.isin(split, ["train", "test"]) & ~is_eval
+    calib = is_eval & (run < N_CALIB_RUNS)
+    hidden = is_eval & (run >= N_CALIB_RUNS)
+    people = sorted(np.unique(subj[is_eval]), key=int)
+    return train, calib, hidden, people
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=0)
@@ -166,6 +185,14 @@ def main():
     ap.add_argument("--reuse-eegnet", type=Path, default=None,
                     help="mixture.pt whose EEGNet experts (and EEGNet fingerprint) to reuse")
     ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--eval-people", default=None, help="JSON with a 'people' list (sim2)")
+    ap.add_argument("--shallow-experts", action="store_true")
+    ap.add_argument("--reve-probe", action="store_true")
+    ap.add_argument("--reve-lam", type=float, default=0.1)
+    ap.add_argument("--reve-emb-cache", default=None,
+                    help="outputs/t2-portfolio/reve_emb_dreyer.npz")
+    ap.add_argument("--combiner", choices=["C3", "portfolio"], default="C3")
+    ap.add_argument("--portfolio-coef", default=None)
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
     t_start = time.time()
@@ -177,15 +204,18 @@ def main():
     sfreq = float(d["sfreq"])
     n_chans, n_times = X.shape[1:]
     n_classes = int(y.max()) + 1
-    is_eval = split == "test"
-    calib = is_eval & (run < N_CALIB_RUNS)
-    hidden = is_eval & (run >= N_CALIB_RUNS)
-    people = sorted(np.unique(subj[is_eval]), key=int)
+    eval_people = (json.loads(Path(args.eval_people).read_text())["people"]
+                   if args.eval_people else None)
+    if eval_people is not None and args.reuse_eegnet:
+        raise SystemExit("--reuse-eegnet experts belong to the original evaluation people")
+    if eval_people is not None and args.out == OUT:
+        args.out = OUT / "sim2"          # never overwrite the original simulation's package
+    train_mask, calib, hidden, people = masks(d, eval_people)
     K = len(people)
     s_idx = {s: i for i, s in enumerate(people)}
     lab = np.array([s_idx.get(s, -1) for s in subj])
     log(f"X {X.shape}, {n_classes} classes, {K} evaluation people; windows: "
-        f"pool {int((split == 'train').sum())} + calib {int(calib.sum())}, "
+        f"pool {int(train_mask.sum())} + calib {int(calib.sum())}, "
         f"val {int((split == 'val').sum())}, hidden test {int(hidden.sum())}")
 
     import copy
@@ -200,7 +230,7 @@ def main():
         log(f"reusing {len(experts)} EEGNet experts from {args.reuse_eegnet}")
     else:
         # 1. pooled model: training pool + calibration runs
-        pool = (split == "train") | calib
+        pool = train_mask | calib
         val = split == "val"
         log("pooled EEGNet")
         pooled, info_pooled = fit(
@@ -250,6 +280,50 @@ def main():
         config_extra |= {"riemann_n_times_out": int(n_out), "combiner": "C3",
                          "combiner_coef": riemann_parts.C3}
 
+    # 5. extra expert streams (loop C) and the portfolio combiner
+    extra_files = []
+    if args.shallow_experts:
+        log("ShallowFBCSPNet pooled + per-person fine-tunes")
+        sys.path.insert(0, str(REPO / "research" / "expert-portfolio" / "src"))
+        from stream_bank import train_stream
+        _, sh, _ = train_stream(X, y, train_mask | calib, split == "val",
+                                [calib & (subj == s) for s in people], sfreq, args.seed,
+                                args.threads, epochs=args.epochs, ft_epochs=args.ft_epochs)
+        state["shallow_experts"] = [e.state_dict() for e in sh]
+        config_extra["shallow_experts"] = True
+    if args.reve_probe:
+        log("REVE probe heads")
+        import reve_parts
+        from submission import load_reve_encoder
+        pos_dir = REPO / "outputs" / "t2-portfolio" / "reve_positions"
+        R = reve_parts.resample_matrix(n_times, sfreq)
+        pos = reve_parts.positions(ch_names, pos_dir / "reve_positions.json")
+        if args.reve_emb_cache:
+            Z = np.load(args.reve_emb_cache)["full"]
+            assert len(Z) == len(X), "embedding cache does not match the windows"
+        else:
+            Z = reve_parts.embed(load_reve_encoder(pos_dir), X, R, pos)
+        pool = train_mask | calib
+        mu, sd = Z[pool].mean(0), Z[pool].std(0) + 1e-6
+        W0, b0 = reve_parts.fit_head((Z[pool] - mu) / sd, y[pool], n_classes, 1e-3)
+        W, b = reve_parts.fit_person_heads((Z[calib] - mu) / sd, y[calib], lab[calib], K,
+                                           n_classes, W0, b0, args.reve_lam)
+        state["reve"] = reve_parts.export(R, pos, mu, sd, W, b)
+        config_extra |= {"reve_probe": True, "reve_n_out": int(R.shape[1])}
+        extra_files += [pos_dir / "reve_positions.json", pos_dir / "reve_kwargs.json"]
+    if args.combiner == "portfolio":
+        if args.no_riemann_experts:
+            raise SystemExit("the portfolio combiner needs the Riemannian experts")
+        coef = json.loads(Path(args.portfolio_coef).read_text())
+        n_streams = 1 + int(args.shallow_experts) + int(args.reve_probe)
+        assert len(coef["w"]) == n_streams, "coefficients don't match the enabled streams"
+        b_full = [0.0, *coef["b"]] if n_classes == 2 else [0.0] * n_classes
+        state["combiner"] = {"w": torch.tensor(coef["w"], dtype=torch.float64),
+                             "c": torch.tensor(coef["c"], dtype=torch.float64),
+                             "class_bias": torch.tensor(b_full, dtype=torch.float64),
+                             "rel": state["combiner"]["rel"]}
+        config_extra |= {"combiner": "portfolio", "combiner_coef": coef}
+
     # Package: the exact files a Codabench upload would contain
     sub_dir = args.out / "submission"
     if sub_dir.exists():
@@ -266,6 +340,8 @@ def main():
               "seed": args.seed,
               "eegnet_experts": str(args.reuse_eegnet) if args.reuse_eegnet else "trained"}
     (sub_dir / "config.json").write_text(json.dumps(config, indent=2))
+    for f in extra_files:
+        shutil.copyfile(f, sub_dir / f.name)
     zip_path = args.out / "track2_dreyer_sim.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(sub_dir.iterdir()):
@@ -273,8 +349,8 @@ def main():
     log(f"packaged {zip_path} ({zip_path.stat().st_size / 1e6:.2f} MB)")
 
     # Score on the hidden runs, reloading from the packaged files
-    meta = {"ch_names": ch_names, "n_times": int(n_times),
-            "n_classes": n_classes, "device": "cpu"}
+    meta = {"ch_names": ch_names, "n_times": int(n_times), "n_classes": n_classes,
+            "device": "cpu", "sfreq": sfreq, "submission_dir": sub_dir}
     state = torch.load(sub_dir / "mixture.pt", map_location="cpu", weights_only=True)
     mixture = build_model(meta, json.loads((sub_dir / "config.json").read_text()), state)
     Xh, yh, sh = X[hidden], y[hidden], subj[hidden]
@@ -301,7 +377,22 @@ def main():
         preds["control"] = logits(control, Xh).argmax(1).numpy()
     preds |= {"EEGNet experts, oracle": lp_eeg[n, true_idx].argmax(1).numpy(),
               "EEGNet experts, soft": soft(lp_eeg)}
-    if not args.no_riemann_experts:
+    if args.combiner == "portfolio":
+        from submission import LogLinearCombiner
+        c3 = LogLinearCombiner(K, n_classes)
+        c3.coef.copy_(torch.tensor([riemann_parts.C3["a"], riemann_parts.C3["c0"],
+                                    riemann_parts.C3["c1"]], dtype=torch.float64))
+        if n_classes == 2:
+            c3.class_bias[1] = riemann_parts.C3["b"]
+        c3.rel.copy_(mixture.combiner.rel)
+        with torch.inference_mode():
+            lp_c3 = torch.cat([c3(lp_eeg[i:i + 256], mixture.riemann(Xt[i:i + 256]))
+                               for i in range(0, len(Xt), 256)]).double()
+        preds |= {"E+T (C3), oracle": lp_c3[n, true_idx].argmax(1).numpy(),
+                  "E+T (C3), soft": soft(lp_c3),
+                  "full combination, oracle": lp_all[n, true_idx].argmax(1).numpy(),
+                  "full combination, soft": soft(lp_all)}
+    elif not args.no_riemann_experts:
         preds |= {"+ Riemannian (C3), oracle": lp_all[n, true_idx].argmax(1).numpy(),
                   "+ Riemannian (C3), soft": soft(lp_all)}
     preds["shipped mixture (predict)"] = p_mix
@@ -313,6 +404,7 @@ def main():
                         "mean_over_people": float(np.mean(per)),
                         "per_person": dict(zip(people, map(float, per)))}
     result = {"args": {k: str(v) for k, v in vars(args).items()},
+              "eval_people": people,
               "fingerprint_bal_acc": fp_acc,
               "pooled": info_pooled, "fingerprint": info_fp,
               "riemann_reliability": None if rel is None else dict(zip(people, rel.tolist())),
@@ -323,7 +415,10 @@ def main():
     RESULTS.mkdir(exist_ok=True)
     tag = (f"dreyer_sim_seed{args.seed}_{args.fingerprint}"
            f"{'' if args.no_riemann_experts else '_c3'}"
-           f"{'_reused' if args.reuse_eegnet else ''}")
+           f"{'_reused' if args.reuse_eegnet else ''}"
+           f"{'_sim2' if args.eval_people else ''}{'_shallow' if args.shallow_experts else ''}"
+           f"{'_reve' if args.reve_probe else ''}"
+           f"{'_portfolio' if args.combiner == 'portfolio' else ''}")
     (RESULTS / f"{tag}.json").write_text(json.dumps(result, indent=2))
     (RESULTS / f"{tag}.md").write_text(render(result, K))
     print(render(result, K), flush=True)
@@ -333,13 +428,18 @@ def render(r, K):
     a = r["args"]
     experts = ("reused from `" + a["reuse_eegnet"] + "`" if a["reuse_eegnet"] != "None"
                else "trained")
-    riemann = "off" if a["no_riemann_experts"] == "True" else "on (combiner C3)"
+    riemann = "off" if a["no_riemann_experts"] == "True" else f"on (combiner {a['combiner']})"
+    streams = [x for x, f in (("ShallowFBCSPNet", "shallow_experts"), ("REVE probe", "reve_probe"))
+               if a.get(f) == "True"]
+    who = ("sim2: " + ", ".join(r["eval_people"]) if a.get("eval_people") not in (None, "None")
+           else "subjects 61–81")
     lines = ["# Track 2: fingerprint mixture on Dreyer 2023 (sealed-phase simulation)\n",
-             f"{K} evaluation people (subjects 61–81); calibration = runs R1–R3, "
+             f"{K} evaluation people ({who}); calibration = runs R1–R3, "
              f"hidden test = R4–R6 ({r['n_hidden_windows']} windows). 2-class MI, "
              f"chance 0.5. Seed {a['seed']}. Fingerprint `{a['fingerprint']}`: "
-             f"{r['fingerprint_bal_acc']:.3f} 21-way on the hidden runs (chance "
-             f"{1 / K:.3f}). Riemannian experts {riemann}. EEGNet experts {experts}.\n",
+             f"{r['fingerprint_bal_acc']:.3f} {K}-way on the hidden runs (chance "
+             f"{1 / K:.3f}). Riemannian experts {riemann}. EEGNet experts {experts}. "
+             f"Extra streams: {', '.join(streams) or 'none'}.\n",
              "| Model | Balanced acc (windows) | Mean over people |", "|---|---|---|"]
     for name, s in r["scores"].items():
         lines.append(f"| {name} | {s['bal_acc']:.3f} | {s['mean_over_people']:.3f} |")
