@@ -1,0 +1,73 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Fingerprint loop progress</title>
+<style>
+:root{--surface:#fcfcfb;--text:#0b0b0b;--text2:#52514e;--muted:#8a8984;--grid:#e6e5e0;
+--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--card:#ffffff;--border:#e6e5e0}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--surface:#1a1a19;--text:#fff;
+--text2:#c3c2b7;--muted:#8f8e86;--grid:#33332f;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--card:#222220;--border:#33332f}}
+:root[data-theme="dark"]{--surface:#1a1a19;--text:#fff;--text2:#c3c2b7;--muted:#8f8e86;--grid:#33332f;
+--s1:#3987e5;--s2:#d95926;--s3:#199e70;--card:#222220;--border:#33332f}
+body{background:var(--surface);color:var(--text);font:15px/1.55 system-ui,sans-serif;margin:0}
+main{max-width:860px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:19px;margin:36px 0 8px}
+p,li{color:var(--text2)} .muted{color:var(--muted);font-size:13px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin:12px 0;overflow-x:auto}
+.chart{width:100%;height:auto}.grid{stroke:var(--grid);stroke-width:1}
+.tick{fill:var(--muted);font-size:11px}.rowlab{fill:var(--text2);font-size:12px}
+.dot{stroke:var(--card);stroke-width:2}.s1{fill:var(--s1);stroke:var(--s1)}.s2{fill:var(--s2);stroke:var(--s2)}
+.s3{fill:var(--s3);stroke:var(--s3)}.dot.s1,.dot.s2,.dot.s3{stroke:var(--card)}.err{stroke-width:2;opacity:.5}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--text2);margin:4px 0 8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+table{border-collapse:collapse;width:100%;font-size:13.5px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+thead th{color:var(--muted);font-weight:600}.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.kpi b{display:block;font-size:26px;color:var(--text)}.kpi span{color:var(--muted);font-size:13px}
+</style></head><body><main>
+<h1>Track 2 loop A: fingerprint model</h1>
+<p class="muted">Progress report 001 · branch exp/fingerprint-model · dev decisions on R3 and drift proxies only</p>
+<div class="kpis">
+<div class="card kpi"><b>0.996</b><span>fingerprint on hidden R4–R6 (shipped EEGNet: 0.744)</span></div>
+<div class="card kpi"><b>0.907</b><span>soft mixture on R4–R6 = oracle ID 0.9075 (shipped 0.901)</span></div>
+<div class="card kpi"><b>0.992</b><span>BNCI cross-day person ID, 18 × 2-Hz bands (broadband 0.872)</span></div>
+</div>
+<h2>What we found</h2>
+<p><b>A filter-bank covariance fingerprint solves person ID here.</b> Per-band spatial covariance → Riemannian tangent space → logistic regression identifies the 21 Dreyer evaluation people from one 4-s window at 0.996 on the hidden runs (pre-registered confirmation). Soft routing then reaches the oracle-ID ceiling, so on Dreyer there is nothing left for a better fingerprint to gain.</p>
+<p><b>Why:</b> identity lives in the spatial structure of alpha/beta oscillations. The 8–13 Hz band alone identifies BNCI people across days at 0.975; delta (1–4 Hz) is just as good within a session but day-specific (0.710 across days). A broadband covariance is dominated by that delta power, which is why it failed across days (0.872).</p>
+<p><b>The EEGNet fingerprint was weaker than it looked:</b> at a fixed 150-epoch budget (no epoch picked on R3), it scores 0.618 on R3 with NLL 2.26. The shipped 0.857 came from selecting the epoch on R3 itself.</p>
+<p><b>Shippable:</b> zero-phase filtering on a fixed window is one T × T matrix per band. The whole fingerprint runs in pure torch and matches the sklearn pipeline to 4e-6 (5.7 MB).</p>
+<h2>Next</h2>
+<ul><li>H3.3: pick the filter bank on BNCI-2014/Dreyer by a locked rule, then test it on two held-out cross-day datasets (BNCI2015_001, Zhou2016). Running.</li>
+<li>Finish the pre-registered EEGNet comparisons (H0, H3.1) and the EEGNet + Riemann ensembles (H6).</li>
+<li>Sealed-phase questions: exclude EOG/EMG channels from the fingerprint? Train on several calibration days?</li></ul>
+
+<h2>Person-ID balanced accuracy on the dev benchmarks</h2>
+<div class="card"><div class="legend"><span><i style='background:var(--s1)'></i>EEGNet (shipped recipe, last epoch)</span><span><i style='background:var(--s2)'></i>Riemann, broadband</span><span><i style='background:var(--s3)'></i>Riemann, 6-band filter bank</span></div>
+<svg viewBox="0 0 720 236" role="img" aria-label="Balanced accuracy by benchmark and model" class="chart">
+<line x1="290.0" x2="290.0" y1="22" y2="210" class="grid"/><text x="290.0" y="226" class="tick" text-anchor="middle">0.50</text>
+<line x1="370.0" x2="370.0" y1="22" y2="210" class="grid"/><text x="370.0" y="226" class="tick" text-anchor="middle">0.60</text>
+<line x1="450.0" x2="450.0" y1="22" y2="210" class="grid"/><text x="450.0" y="226" class="tick" text-anchor="middle">0.70</text>
+<line x1="530.0" x2="530.0" y1="22" y2="210" class="grid"/><text x="530.0" y="226" class="tick" text-anchor="middle">0.80</text>
+<line x1="610.0" x2="610.0" y1="22" y2="210" class="grid"/><text x="610.0" y="226" class="tick" text-anchor="middle">0.90</text>
+<line x1="690.0" x2="690.0" y1="22" y2="210" class="grid"/><text x="690.0" y="226" class="tick" text-anchor="middle">1.00</text>
+<text x="278" y="56.0" class="rowlab" text-anchor="end">Dreyer R1–R2 → R3 (locked inner loop)</text>
+<circle cx="384.3" cy="43.0" r="5" class="dot s1"><title>EEGNet (shipped recipe, last epoch) · Dreyer R1–R2 → R3 (locked inner loop): bal_acc 0.618</title></circle>
+<circle cx="679.5" cy="52.0" r="5" class="dot s2"><title>Riemann, broadband · Dreyer R1–R2 → R3 (locked inner loop): bal_acc 0.987</title></circle>
+<circle cx="690.0" cy="61.0" r="5" class="dot s3"><title>Riemann, 6-band filter bank · Dreyer R1–R2 → R3 (locked inner loop): bal_acc 1.000</title></circle>
+<text x="278" y="100.0" class="rowlab" text-anchor="end">Dreyer R1 → R2 (one training run)</text>
+<circle cx="663.3" cy="96.0" r="5" class="dot s2"><title>Riemann, broadband · Dreyer R1 → R2 (one training run): bal_acc 0.967</title></circle>
+<circle cx="687.1" cy="105.0" r="5" class="dot s3"><title>Riemann, 6-band filter bank · Dreyer R1 → R2 (one training run): bal_acc 0.996</title></circle>
+<text x="278" y="144.0" class="rowlab" text-anchor="end">Dreyer R1 → R3 (two runs later)</text>
+<circle cx="671.0" cy="140.0" r="5" class="dot s2"><title>Riemann, broadband · Dreyer R1 → R3 (two runs later): bal_acc 0.976</title></circle>
+<circle cx="690.0" cy="149.0" r="5" class="dot s3"><title>Riemann, 6-band filter bank · Dreyer R1 → R3 (two runs later): bal_acc 1.000</title></circle>
+<text x="278" y="188.0" class="rowlab" text-anchor="end">BNCI day 1 → day 2 (cross-day, 9 people)</text>
+<circle cx="587.2" cy="184.0" r="5" class="dot s2"><title>Riemann, broadband · BNCI day 1 → day 2 (cross-day, 9 people): bal_acc 0.872</title></circle>
+<circle cx="669.3" cy="193.0" r="5" class="dot s3"><title>Riemann, 6-band filter bank · BNCI day 1 → day 2 (cross-day, 9 people): bal_acc 0.974</title></circle>
+</svg>
+<p class="muted">Dots: mean over seeds (EEGNet) or the deterministic value (Riemann); bars: ±1 SD over 3 seeds.
+Chance: 1/21 = 0.048 (Dreyer), 1/9 = 0.111 (BNCI).</p></div>
+<div class="card"><table><thead><tr><th>Benchmark</th><th>EEGNet (shipped recipe, last epoch)</th><th>Riemann, broadband</th><th>Riemann, 6-band filter bank</th></tr></thead><tbody><tr><th scope='row'>Dreyer R1–R2 → R3 (locked inner loop)</th><td>0.618<br><span class='muted'>NLL 2.256</span></td><td>0.987<br><span class='muted'>NLL 0.107</span></td><td>1.000<br><span class='muted'>NLL 0.027</span></td></tr><tr><th scope='row'>Dreyer R1 → R2 (one training run)</th><td class='muted'>running</td><td>0.967<br><span class='muted'>NLL 0.153</span></td><td>0.996<br><span class='muted'>NLL 0.065</span></td></tr><tr><th scope='row'>Dreyer R1 → R3 (two runs later)</th><td class='muted'>running</td><td>0.976<br><span class='muted'>NLL 0.188</span></td><td>1.000<br><span class='muted'>NLL 0.052</span></td></tr><tr><th scope='row'>BNCI day 1 → day 2 (cross-day, 9 people)</th><td class='muted'>running</td><td>0.872<br><span class='muted'>NLL 0.403</span></td><td>0.974<br><span class='muted'>NLL 0.071</span></td></tr></tbody></table></div>
+<h2>Band ablation (H3.2): balanced accuracy / NLL</h2>
+<div class="card"><table><thead><tr><th>Bands</th><th>R1–R2 → R3</th><th>R1 → R3</th><th>BNCI cross-day</th></tr></thead><tbody><tr><th scope='row'>single_1-4</th><td>0.989 <span class='muted'>/ 0.109</span></td><td>0.968 <span class='muted'>/ 0.220</span></td><td>0.710 <span class='muted'>/ 0.947</span></td></tr><tr><th scope='row'>single_4-8</th><td>0.996 <span class='muted'>/ 0.078</span></td><td>0.993 <span class='muted'>/ 0.141</span></td><td>0.894 <span class='muted'>/ 0.371</span></td></tr><tr><th scope='row'>single_8-13</th><td>0.999 <span class='muted'>/ 0.046</span></td><td>1.000 <span class='muted'>/ 0.095</span></td><td>0.975 <span class='muted'>/ 0.101</span></td></tr><tr><th scope='row'>single_13-20</th><td>0.998 <span class='muted'>/ 0.051</span></td><td>1.000 <span class='muted'>/ 0.086</span></td><td>0.931 <span class='muted'>/ 0.241</span></td></tr><tr><th scope='row'>single_20-30</th><td>1.000 <span class='muted'>/ 0.034</span></td><td>1.000 <span class='muted'>/ 0.066</span></td><td>0.945 <span class='muted'>/ 0.161</span></td></tr><tr><th scope='row'>single_30-45</th><td>0.987 <span class='muted'>/ 0.062</span></td><td>0.993 <span class='muted'>/ 0.105</span></td><td>0.930 <span class='muted'>/ 0.207</span></td></tr><tr><th scope='row'>drop_1-4</th><td>1.000 <span class='muted'>/ 0.027</span></td><td>1.000 <span class='muted'>/ 0.049</span></td><td>0.981 <span class='muted'>/ 0.055</span></td></tr><tr><th scope='row'>drop_4-8</th><td>1.000 <span class='muted'>/ 0.028</span></td><td>1.000 <span class='muted'>/ 0.053</span></td><td>0.982 <span class='muted'>/ 0.058</span></td></tr><tr><th scope='row'>drop_8-13</th><td>1.000 <span class='muted'>/ 0.031</span></td><td>1.000 <span class='muted'>/ 0.057</span></td><td>0.958 <span class='muted'>/ 0.123</span></td></tr><tr><th scope='row'>drop_13-20</th><td>1.000 <span class='muted'>/ 0.029</span></td><td>1.000 <span class='muted'>/ 0.057</span></td><td>0.969 <span class='muted'>/ 0.085</span></td></tr><tr><th scope='row'>drop_20-30</th><td>1.000 <span class='muted'>/ 0.032</span></td><td>1.000 <span class='muted'>/ 0.062</span></td><td>0.968 <span class='muted'>/ 0.082</span></td></tr><tr><th scope='row'>drop_30-45</th><td>1.000 <span class='muted'>/ 0.028</span></td><td>1.000 <span class='muted'>/ 0.055</span></td><td>0.967 <span class='muted'>/ 0.082</span></td></tr><tr><th scope='row'>fb_plus_broad</th><td>1.000 <span class='muted'>/ 0.026</span></td><td>1.000 <span class='muted'>/ 0.050</span></td><td>0.963 <span class='muted'>/ 0.094</span></td></tr><tr><th scope='row'>fine18</th><td>1.000 <span class='muted'>/ 0.026</span></td><td>1.000 <span class='muted'>/ 0.051</span></td><td>0.992 <span class='muted'>/ 0.035</span></td></tr></tbody></table></div>
+<h2>Confirmation on the hidden runs R4–R6 (pre-registered, confirm-1)</h2>
+<p class="muted">Soft mixture uses the fixed EEGNet experts of the shipped seed-0 mixture. Shipped: fingerprint 0.744, soft 0.901, oracle 0.908.</p>
+<div class="card"><table><thead><tr><th>Fingerprint</th><th>21-way bal. acc</th><th>NLL</th><th>Mixture, soft</th><th>hard</th><th>oracle ID</th></tr></thead><tbody><tr><th scope='row'>ts_fb_C1_seed0</th><td>0.996</td><td>0.044</td><td>0.907</td><td>0.907</td><td>0.908</td></tr><tr><th scope='row'>ts_broad_C1_seed0</th><td>0.990</td><td>0.080</td><td>0.908</td><td>0.908</td><td>0.908</td></tr></tbody></table></div>
+</main></body></html>

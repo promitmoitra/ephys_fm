@@ -1,0 +1,26 @@
+{
+  "metrics": {
+    "bal_acc": 0.9975,
+    "nll": 0.0390826931609099,
+    "p_true": 0.965086341225261,
+    "ece": 0.03305112156116952,
+    "top3": 1.0,
+    "worst_person_recall": 0.99,
+    "per_person_recall": [
+      0.99,
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "dataset": "BNCI2015_001",
+  "bank": "fine18",
+  "arm": "S1+S2_halfmatched",
+  "n_train": 2400,
+  "test_people": [
+    7,
+    8,
+    9,
+    10
+  ]
+}
