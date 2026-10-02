@@ -11,8 +11,7 @@ this protocol before running any git command.
 | `.claude/worktrees/track2` | currently `exp/dreyer-eog` | Track 2 (BCI decoding) competition work |
 | `.claude/worktrees/data-atlas` | `research/data-atlas` | Data atlas research track ([vision](docs/atlas/vision.md)) |
 | `.claude/worktrees/t2-fingerprint` | `exp/fingerprint-model` | Track 2 autoresearch loop A: a better per-window fingerprint (person ID) model |
-| `.claude/worktrees/t2-expert-weights` | `exp/expert-weights` | Track 2 autoresearch loop B: learned weights for combining per-person EEGNet and Riemannian experts |
-| `.claude/worktrees/t2-integration` | `track2/integrate-fp-c3` | Track 2: loop A's fingerprint and loop B's combiner in `submission.py`; contract check |
+| `.claude/worktrees/t2-portfolio` | `exp/expert-portfolio` | Track 2 loop C: expert portfolio (REVE probe, ShallowFBCSPNet) behind a learned combiner ([spec](docs/superpowers/specs/2026-10-02-expert-portfolio-design.md)) |
 
 The two Track 2 research loops run in parallel with a shared heartbeat. Each writes run artifacts
 to its own subfolder of the shared `outputs/` (`outputs/t2-fingerprint/`, `outputs/t2-expert-weights/`)
