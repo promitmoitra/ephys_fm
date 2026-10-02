@@ -1,0 +1,16 @@
+project:
+  title: "Track 2 loop C: expert portfolio behind a learned combiner"
+  question: >
+    Do a frozen-REVE probe and ShallowFBCSPNet experts earn weight next to the shipped EEGNet and
+    Riemannian experts, on Dreyer (dev) and across days (BNCI 2014-001)?
+  status: active
+  started: "2026-10-02"
+  worktree: .claude/worktrees/t2-portfolio
+  branch: exp/expert-portfolio
+  spec: docs/superpowers/specs/2026-10-02-expert-portfolio-design.md
+  plan: docs/superpowers/plans/2026-10-02-expert-portfolio.md
+hypotheses:
+  - {id: S1, statement: "REVE frozen probe earns weight (drop-one ≥ 0.005 acc or NLL) and does not hurt on BNCI", status: pending}
+  - {id: S2, statement: "ShallowFBCSPNet experts earn weight and do not hurt on BNCI", status: pending}
+jobs: []
+checkpoints: []
