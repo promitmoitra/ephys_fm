@@ -30,6 +30,8 @@ pipelines they were fitted with (track2/riemann_parts.py).
 """
 
 import json
+import os
+from pathlib import Path
 
 import torch
 from torch import nn
@@ -127,6 +129,69 @@ class LogLinearCombiner(nn.Module):
         w = (c0 + c1 * (self.rel - 0.5))[None, :, None]
         z = a * logp_eeg.to(w.dtype) + w * logp_riemann + self.class_bias
         return torch.log_softmax(z, -1)
+
+
+def standardize_clip(X, clip=15.0):
+    """Per-window, per-channel z-score clipped at ±clip SD (REVE's pretraining input)."""
+    mu = X.mean(-1, keepdim=True)
+    sd = X.std(-1, keepdim=True).clamp_min(1e-6)
+    return ((X - mu) / sd).clamp(-clip, clip)
+
+
+def load_reve_encoder(positions_dir, _constructor=None):
+    """Frozen REVE from the pre-staged Hugging Face cache, fully offline.
+
+    braindecode's REVE reads its position bank from $REVE_POSITIONS_PATH/reve_positions.json
+    when it is constructed; the submission ships that file, plus reve_kwargs.json (the
+    constructor arguments probe P0 found necessary, possibly {})."""
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["REVE_POSITIONS_PATH"] = str(positions_dir)
+    if _constructor is None:
+        from braindecode.models import REVE
+        kw_file = Path(positions_dir) / "reve_kwargs.json"
+        kwargs = json.loads(kw_file.read_text()) if kw_file.exists() else {}
+
+        def _constructor():
+            return REVE.from_pretrained("brain-bzh/reve-base", **kwargs)
+    enc = _constructor().eval()
+    for p in enc.parameters():
+        p.requires_grad_(False)
+    return enc
+
+
+class ReveProbe(nn.Module):
+    """Frozen REVE encoder + per-participant linear heads (loop C); forward -> (B, K, C)."""
+
+    def __init__(self, encoder, n_people, n_classes, n_chans, n_times, n_out, emb_dim=512):
+        super().__init__()
+        self.encoder = encoder           # not in this module's state dict (frozen, cached)
+        self.register_buffer("resample", torch.zeros(n_times, n_out))
+        self.register_buffer("pos", torch.zeros(n_chans, 3))
+        d = torch.float64
+        self.register_buffer("mu", torch.zeros(emb_dim, dtype=d))
+        self.register_buffer("sd", torch.ones(emb_dim, dtype=d))
+        self.register_buffer("weight", torch.zeros(n_people, n_classes, emb_dim, dtype=d))
+        self.register_buffer("bias", torch.zeros(n_people, n_classes, dtype=d))
+
+    def state_dict(self, *args, **kwargs):
+        sd = super().state_dict(*args, **kwargs)
+        return {k: v for k, v in sd.items() if not k.startswith("encoder.")}
+
+    def load_state_dict(self, state, strict=True):
+        """The frozen encoder is not in the shipped state; every probe buffer must be."""
+        result = super().load_state_dict(state, strict=False)
+        missing = [k for k in result.missing_keys if not k.startswith("encoder.")]
+        if strict and (missing or result.unexpected_keys):
+            raise RuntimeError(f"ReveProbe state: missing {missing}, "
+                               f"unexpected {result.unexpected_keys}")
+        return result
+
+    def forward(self, X):
+        x = standardize_clip(X.to(self.resample.dtype) @ self.resample)
+        f = self.encoder(x, pos=self.pos.expand(len(x), -1, -1), return_features=True)
+        z = (f["features"].mean(dim=(1, 2)).to(self.mu.dtype) - self.mu) / self.sd
+        logits = torch.einsum("bd,kcd->bkc", z, self.weight) + self.bias
+        return torch.log_softmax(logits, -1)
 
 
 # --------------------------------------------------------------------------
