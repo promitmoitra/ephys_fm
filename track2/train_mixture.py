@@ -112,8 +112,8 @@ def load_windows():
 # --------------------------------------------------------------------------
 
 def make_eegnet(n_chans, n_outputs, n_times):
-    from braindecode.models import EEGNet
-    return EEGNet(n_chans=n_chans, n_outputs=n_outputs, n_times=n_times)
+    from models import make_model
+    return make_model("eegnet", n_chans, n_outputs, n_times, sfreq=120.0)
 
 
 def logits(model, X, bs=512):
