@@ -45,6 +45,16 @@ class TestPortfolio(unittest.TestCase):
         b = PortfolioLogLinear(["eegnet", "ts", "rel"]).fit(F, y).predict(F)
         np.testing.assert_allclose(a, b, atol=1e-5)
 
+    def test_research_combiner_handles_four_classes(self):
+        rng = np.random.default_rng(1)
+        F = {k: torch.log_softmax(torch.tensor(rng.standard_normal((5, 4))), -1).numpy()
+             for k in ("eegnet", "ts")} | {"rel": rng.uniform(0.4, 1.0, (5, 1))}
+        comb = PortfolioLogLinear(["eegnet", "ts", "rel"])
+        comb.theta["b"] = torch.zeros(3, dtype=torch.float64)
+        lp = comb.predict(F)
+        self.assertEqual(lp.shape, (5, 4))
+        np.testing.assert_allclose(np.exp(lp).sum(-1), 1.0, atol=1e-9)
+
     def test_old_config_loads_without_new_keys(self):
         sub = REPO / "outputs" / "t2-integration" / "fb_c3" / "submission"
         if not sub.exists():

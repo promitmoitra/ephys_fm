@@ -33,7 +33,7 @@ class PortfolioLogLinear(Combiner):
         *neural, cls, rel = self.experts
         z = sum(w * F[e] for w, e in zip(theta["w"], neural))
         z = z + (theta["c"][0] + theta["c"][1] * (F[rel] - 0.5)) * F[cls]
-        z = z + torch.cat([torch.zeros_like(theta["b"]), theta["b"]])
+        z = z + torch.cat([theta["b"].new_zeros(1), theta["b"]])   # class 0 is the reference
         return torch.log_softmax(z, -1)
 
 
