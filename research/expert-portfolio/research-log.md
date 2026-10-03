@@ -10,3 +10,9 @@
   E+T+S 0.894 / NLL 0.253 vs E+T 0.883 / 0.278 on dev. BNCI: E+T+S −0.004 vs E+T (5/5 seeds
   negative, passes the −0.005 bar narrowly). Fixed a 4-class bias bug in PortfolioLogLinear
   found by the BNCI run (test added).
+
+## 2026-10-03
+
+- Protocol 02: sim2 (honest) E+T+S − E+T = −0.005 [−0.016, +0.004]; E+T − EEGNet = +0.001;
+  R4–R6 (upper bound) +0.014. No veto. Neither honest check (sim2, BNCI) shows ShallowFBCSPNet
+  helping; asking the user before packaging (Task 10).
