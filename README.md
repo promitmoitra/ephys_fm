@@ -1,7 +1,8 @@
 # ephys_fm
 
 Our entry for the [EEG/EMG Foundation Challenge 2026](https://neural-interfaces26.github.io/)
-(NeurIPS 2026 Brain & Body Workshop), all four tracks.
+(NeurIPS 2026 Brain & Body Workshop), all four tracks. New collaborators: start with
+[`docs/onboarding.md`](docs/onboarding.md).
 
 | # | Track | `predict(X)` returns | Metric | Codabench |
 |---|---|---|---|---|
