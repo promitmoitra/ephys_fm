@@ -125,3 +125,76 @@ class TestFingerprintTwoClasses(unittest.TestCase):
             p = torch.softmax(fp(torch.from_numpy(X)), 1).numpy()
         self.assertEqual(p.shape, (60, 2))
         self.assertGreater((p.argmax(1) == lab).mean(), 0.9)
+
+
+class TestReviewFixes(unittest.TestCase):
+    """Final-review findings I1, I2, I3, M2, M3, M4: each pinned before its fix."""
+
+    def test_i1_extra_streams_need_the_portfolio_combiner(self):
+        from submission import FingerprintMixture
+        with self.assertRaisesRegex(ValueError, "portfolio"):
+            FingerprintMixture(27, 480, 2, 3, riemann_n_times_out=420, shallow=True, combiner="C3")
+        from train_mixture import check_stream_args
+        with self.assertRaises(SystemExit):
+            check_stream_args(shallow=True, reve=False, combiner="C3", coef_path=None)
+        with self.assertRaises(SystemExit):
+            check_stream_args(shallow=False, reve=False, combiner="portfolio", coef_path=None)
+        check_stream_args(shallow=True, reve=False, combiner="portfolio", coef_path="x.json")
+
+    def test_i2_non_original_runs_never_write_the_original_package(self):
+        from train_mixture import OUT, resolve_out
+        rel = Path("outputs/track2_dreyer_sim")                       # README-style relative path
+        self.assertEqual(resolve_out(OUT, original=True), OUT)
+        for out in (OUT, rel, OUT / "." ):
+            with self.assertRaises(SystemExit):
+                resolve_out(out, original=False)
+        self.assertEqual(resolve_out(Path("/tmp/elsewhere"), original=False), Path("/tmp/elsewhere"))
+
+    def test_i3_research_combiner_fits_three_classes(self):
+        rng = np.random.default_rng(2)
+        n, C = 90, 3
+        y = rng.integers(0, C, n)
+        lsm = lambda z: torch.log_softmax(torch.tensor(z), -1).numpy()   # noqa: E731
+        F = {"eegnet": lsm(3 * np.eye(C)[y] + rng.standard_normal((n, C))),
+             "ts": lsm(rng.standard_normal((n, C))), "rel": rng.uniform(0.4, 1.0, (n, 1))}
+        comb = PortfolioLogLinear(["eegnet", "ts", "rel"], n_classes=C).fit(F, y)
+        self.assertEqual(comb.theta["b"].shape[0], C - 1)
+        self.assertEqual(comb.predict(F).shape, (n, C))
+
+    def test_i3_m3_packaging_checks_streams_and_bias_length(self):
+        from train_mixture import portfolio_state
+        rel = torch.zeros(4, dtype=torch.float64)
+        coef = {"streams": ["eegnet", "shallow"], "w": [0.5, 0.4], "c": [0.8, 1.3], "b": [0.1, -0.2]}
+        st = portfolio_state(coef, ["eegnet", "shallow"], n_classes=3, rel=rel)
+        self.assertEqual(st["class_bias"].tolist(), [0.0, 0.1, -0.2])
+        with self.assertRaisesRegex(ValueError, "order"):
+            portfolio_state(coef | {"streams": ["eegnet", "reve"]}, ["eegnet", "shallow"], 3, rel)
+        with self.assertRaisesRegex(ValueError, "bias"):
+            portfolio_state(coef, ["eegnet", "shallow"], n_classes=2, rel=rel)
+        with self.assertRaisesRegex(ValueError, "streams"):
+            portfolio_state({k: v for k, v in coef.items() if k != "streams"}, ["eegnet", "shallow"], 3, rel)
+
+    def test_m2_short_shallow_state_raises(self):
+        sub = REPO / "outputs" / "t2-integration" / "fb_c3" / "submission"
+        if not sub.exists():
+            self.skipTest("integration package not present")
+        config = json.loads((sub / "config.json").read_text())
+        state = torch.load(sub / "mixture.pt", map_location="cpu", weights_only=True)
+        config = config | {"shallow_experts": True, "combiner": "portfolio"}
+        state = dict(state) | {"shallow_experts": [], "combiner": {
+            "w": torch.zeros(2, dtype=torch.float64), "c": torch.zeros(2, dtype=torch.float64),
+            "class_bias": torch.zeros(2, dtype=torch.float64), "rel": state["combiner"]["rel"]}}
+        meta = {"ch_names": config["ch_names"], "n_times": 480, "n_classes": 2, "device": "cpu",
+                "sfreq": 120.0}
+        with self.assertRaisesRegex(ValueError, "shallow"):
+            build_model(meta, config, state)
+
+    def test_m4_masks_validates_eval_people(self):
+        from train_mixture import masks
+        d = {"subject": np.array(["1", "1", "61", "61", "2", "2", "70", "70"]),
+             "run": np.array([0, 4, 0, 4, 1, 5, 0, 4]),
+             "split": np.array(["train", "train", "test", "test", "train", "train", "val", "val"])}
+        with self.assertRaisesRegex(ValueError, "not found"):
+            masks(d, eval_people=["2", "3"])
+        with self.assertRaisesRegex(ValueError, "val"):
+            masks(d, eval_people=["70"])

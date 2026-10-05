@@ -19,11 +19,15 @@ class PortfolioLogLinear(Combiner):
     experts = [*neural_streams, riemann_key, rel_key]. With one neural stream this is
     loop B's RelLogLinear (same initialisation and penalty)."""
 
+    def __init__(self, experts, n_classes=2):
+        self.n_classes = n_classes                         # class bias has n_classes − 1 entries
+        super().__init__(experts)
+
     def init(self):
         S = len(self.experts) - 2
         th = {"w": torch.full((S,), 0.8, dtype=torch.float64),
               "c": torch.tensor([0.4, 0.0], dtype=torch.float64),
-              "b": torch.zeros(1, dtype=torch.float64)}
+              "b": torch.zeros(self.n_classes - 1, dtype=torch.float64)}
         return th
 
     def penalty(self, theta, theta0):

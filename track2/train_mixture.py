@@ -165,12 +165,50 @@ def masks(d, eval_people=None):
         is_eval = split == "test"
         train = split == "train"
     else:
+        missing = sorted(set(map(str, eval_people)) - set(np.unique(subj).tolist()))
+        if missing:
+            raise ValueError(f"eval people not found in the data: {missing}")
+        if np.isin(subj[split == "val"], list(eval_people)).any():
+            raise ValueError("eval people must not include the kit's val people "
+                             "(their windows choose the pooled model's epoch)")
         is_eval = np.isin(subj, list(eval_people))
         train = np.isin(split, ["train", "test"]) & ~is_eval
     calib = is_eval & (run < N_CALIB_RUNS)
     hidden = is_eval & (run >= N_CALIB_RUNS)
     people = sorted(np.unique(subj[is_eval]), key=int)
     return train, calib, hidden, people
+
+
+def check_stream_args(shallow, reve, combiner, coef_path):
+    """Extra streams only make sense with the portfolio combiner, which needs coefficients."""
+    if (shallow or reve) and combiner != "portfolio":
+        raise SystemExit("--shallow-experts / --reve-probe need --combiner portfolio "
+                         "(C3 would compute the extra streams and ignore them)")
+    if combiner == "portfolio" and not coef_path:
+        raise SystemExit("--combiner portfolio needs --portfolio-coef")
+
+
+def resolve_out(out, original):
+    """Only the original design may write the original simulation's package directory."""
+    out = Path(out)
+    if not original and out.resolve() == OUT.resolve():
+        raise SystemExit(f"{OUT} holds the original design's package; pass another --out")
+    return out
+
+
+def portfolio_state(coef, streams, n_classes, rel):
+    """PortfolioCombiner state from a coefficients JSON, checked against the enabled streams."""
+    if "streams" not in coef:
+        raise ValueError("coefficients JSON lacks 'streams' (the order the weights follow)")
+    if coef["streams"] != list(streams):
+        raise ValueError(f"stream order {coef['streams']} does not match the enabled {list(streams)}")
+    if len(coef["w"]) != len(streams):
+        raise ValueError("one weight per stream expected")
+    if len(coef["b"]) != n_classes - 1:
+        raise ValueError(f"class bias has {len(coef['b'])} entries, expected {n_classes - 1}")
+    f64 = torch.float64
+    return {"w": torch.tensor(coef["w"], dtype=f64), "c": torch.tensor(coef["c"], dtype=f64),
+            "class_bias": torch.tensor([0.0, *coef["b"]], dtype=f64), "rel": rel}
 
 
 def main():
@@ -184,7 +222,8 @@ def main():
     ap.add_argument("--no-riemann-experts", action="store_true")
     ap.add_argument("--reuse-eegnet", type=Path, default=None,
                     help="mixture.pt whose EEGNet experts (and EEGNet fingerprint) to reuse")
-    ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--out", type=Path, default=None,
+                    help=f"default {OUT} (original design) or {OUT}/sim2 (--eval-people)")
     ap.add_argument("--eval-people", default=None, help="JSON with a 'people' list (sim2)")
     ap.add_argument("--shallow-experts", action="store_true")
     ap.add_argument("--reve-probe", action="store_true")
@@ -208,8 +247,14 @@ def main():
                    if args.eval_people else None)
     if eval_people is not None and args.reuse_eegnet:
         raise SystemExit("--reuse-eegnet experts belong to the original evaluation people")
-    if eval_people is not None and args.out == OUT:
-        args.out = OUT / "sim2"          # never overwrite the original simulation's package
+    check_stream_args(args.shallow_experts, args.reve_probe, args.combiner, args.portfolio_coef)
+    original = (eval_people is None and not args.shallow_experts and not args.reve_probe
+                and args.combiner == "C3")
+    if args.out is None:
+        if not original and eval_people is None:
+            raise SystemExit("a non-original design needs an explicit --out")
+        args.out = OUT if original else OUT / "sim2"
+    args.out = resolve_out(args.out, original)
     train_mask, calib, hidden, people = masks(d, eval_people)
     K = len(people)
     s_idx = {s: i for i, s in enumerate(people)}
@@ -315,13 +360,8 @@ def main():
         if args.no_riemann_experts:
             raise SystemExit("the portfolio combiner needs the Riemannian experts")
         coef = json.loads(Path(args.portfolio_coef).read_text())
-        n_streams = 1 + int(args.shallow_experts) + int(args.reve_probe)
-        assert len(coef["w"]) == n_streams, "coefficients don't match the enabled streams"
-        b_full = [0.0, *coef["b"]] if n_classes == 2 else [0.0] * n_classes
-        state["combiner"] = {"w": torch.tensor(coef["w"], dtype=torch.float64),
-                             "c": torch.tensor(coef["c"], dtype=torch.float64),
-                             "class_bias": torch.tensor(b_full, dtype=torch.float64),
-                             "rel": state["combiner"]["rel"]}
+        streams = ["eegnet"] + ["shallow"] * args.shallow_experts + ["reve"] * args.reve_probe
+        state["combiner"] = portfolio_state(coef, streams, n_classes, state["combiner"]["rel"])
         config_extra |= {"combiner": "portfolio", "combiner_coef": coef}
 
     # Package: the exact files a Codabench upload would contain

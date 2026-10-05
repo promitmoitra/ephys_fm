@@ -254,6 +254,9 @@ class FingerprintMixture(nn.Module):
         self.reve = (ReveProbe(reve_encoder, n_experts, n_classes, n_chans, n_times, n_reve_out)
                      if reve_encoder is not None else None)
         self.combiner_kind = combiner
+        if combiner == "C3" and (shallow or reve_encoder is not None):
+            raise ValueError("extra expert streams are only combined by the 'portfolio' combiner; "
+                             "C3 would compute and then ignore them")
         self.riemann = self.combiner = None
         if riemann_n_times_out is not None:
             self.riemann = RiemannExperts(n_experts, n_chans, n_times,
@@ -334,7 +337,11 @@ def build_model(meta, config, state=None):
         model.fingerprint.load_state_dict(state["fingerprint"])
         for expert, sd in zip(model.experts, state["experts"]):
             expert.load_state_dict(sd)
-        for expert, sd in zip(model.shallow_experts, state.get("shallow_experts", [])):
+        shallow_sd = state.get("shallow_experts", [])
+        if len(shallow_sd) != len(model.shallow_experts):
+            raise ValueError(f"config expects {len(model.shallow_experts)} shallow experts, "
+                             f"the state holds {len(shallow_sd)}")
+        for expert, sd in zip(model.shallow_experts, shallow_sd):
             expert.load_state_dict(sd)
         if model.reve is not None:
             model.reve.load_state_dict(state["reve"])

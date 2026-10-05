@@ -9,7 +9,7 @@ REVE probe with mean pooling added nothing anywhere.
 
 | Evidence | E+T+S − E+T (ShallowFBCSPNet added) | Status of the data |
 |---|---|---|
-| Dreyer cross-fitted dev bank (decides) | +0.011 (drop-one CI [+0.000, +0.017]); NLL 0.278 → 0.253 | decision data |
+| Dreyer cross-fitted dev bank (decides) | +0.011 (E+T+S − E+T; NLL 0.278 → 0.253). Ship test, dropping S from E+T+R+S: +0.008, CI [+0.0004, +0.017] | decision data |
 | Dreyer R4–R6, seeds 0–2 | +0.014 (3/3 seeds) | **upper bound**: reused by loops A and B |
 | **Dreyer sim2, 14 fresh people, seeds 0–2** | **−0.005 [−0.016, +0.004]** | honest |
 | **BNCI 2014-001, session 1 → 2, 5 seeds** | **−0.004 (5/5 seeds negative)** | honest, cross-day |
@@ -51,7 +51,7 @@ bounds.
 - `train_mixture.py --eval-people` (sim2), and `--shallow-experts` / `--reve-probe` /
   `--combiner portfolio` packaging.
 - `track2/bench/`: leakage-free benchmark-page solvers.
-- 23 `unittest` tests in `track2/tests/`.
+- 30 `unittest` tests in `track2/tests/`.
 
 ## Lessons and constraints
 
