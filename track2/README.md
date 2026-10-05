@@ -41,13 +41,17 @@ On BNCI2014_001 this beat an epoch-matched pooled control by +0.034 ± 0.007
    Shipped as `submission.RiemannExperts` + `LogLinearCombiner` (float64).
    The four coefficients were fitted on Dreyer; refit them for a new dataset.
 
+R4–R6 rows below are **upper bounds**: those hidden runs gated decisions in loops A, B and C.
+The honest Dreyer estimate is the fresh-people **sim2** row (loop C).
+
 | Evidence | Result |
 |---|---|
 | BNCI, 5 seeds, cross-session | mixture +0.034 ± 0.007 over the epoch-matched control, 5/5 seeds (oracle ID +0.045) |
 | **Shipped package, Dreyer simulation, seed 0** (`results/dreyer_sim_seed0_fb_riemann_c3_reused.md`) | `predict` on R4–R6: **0.921** (previous package 0.901); fingerprint 0.996 (was 0.744); EEGNet experts soft-routed 0.907, + Riemannian 0.921 = oracle 0.921 |
 | Dreyer simulation, seed 0, previous package | pooled 0.873 → control 0.890 → mixture 0.901 (oracle 0.908) |
-| Dreyer, + Riemannian expert (step 6), 3 seeds, oracle ID | EEGNet experts 0.898 → **0.917** (+0.019; +0.014 / +0.020 / +0.024, every person-bootstrap CI > 0); NLL 0.253 → 0.215. Soft-routed with loop A's filter-bank fingerprint, seed 0: 0.921 |
+| Dreyer, + Riemannian expert (step 6), 3 seeds, oracle ID (R4–R6: upper bound) | EEGNet experts 0.898 → **0.917** (+0.019; +0.014 / +0.020 / +0.024, every person-bootstrap CI > 0); NLL 0.253 → 0.215. Soft-routed with loop A's filter-bank fingerprint, seed 0: 0.921 |
 | BNCI, 5 seeds, Dreyer's step-6 coefficients unchanged | +0.052 ± 0.003 over the EEGNet experts (0.745 → 0.797), 5/5 seeds |
+| **Dreyer sim2, 14 fresh people, full pipeline, seeds 0–2 (honest; loop C)** | EEGNet experts 0.9355 → + Riemannian (step 6) **0.9365** (+0.001, CI [−0.004, +0.007]): within a session, step 6 adds little on fresh people; its cross-day gain (BNCI) stands |
 | Contract | the shipped package passes the kit's benchopt run, read-only: 5,040 warm-up test windows, 73 s end to end on CPU (4 threads); ZIP 4.0 MB. Its score there (0.947) is leaky: those windows include the calibration runs it trained on |
 | Fingerprint, Dreyer R4–R6 (loop A, pre-registered) | filter-bank Riemann **0.996** (EEGNet 0.744); soft mixture 0.907 = oracle 0.9075 |
 | Fingerprint, cross-day (loop A) | BNCI2014 day 1 → 2: 0.974; trained on 2 days → day 3: BNCI2015_001 1.000, Zhou2016 0.975 (1 day: 0.935, 0.790) |
@@ -64,7 +68,10 @@ CSP experts or equal averaging of all expert types in the mixture (−0.004,
 between calibration folds, −0.018 to +0.010: the unregularised Riemannian
 expert is over-confident); confidence gating, filter-bank or broadband
 Riemannian experts; explicit hemispheric-asymmetry features (≈ per-channel band power);
-per-trial pre-cue baseline correction (−0.03 within-subject).
+per-trial pre-cue baseline correction (−0.03 within-subject); a second CNN
+expert stream, ShallowFBCSPNet (dev +0.011, but fresh-people sim2 −0.005 and
+BNCI −0.004, 5/5 seeds negative; loop C); a frozen REVE probe with mean pooling
+(0.581 alone on Dreyer; adds nothing; loop C).
 
 **What it uses on Dreyer** (`experiments/dreyer_confound/`,
 `experiments/dreyer_eog/`): mostly an early cue-locked brain response
@@ -72,7 +79,11 @@ per-trial pre-cue baseline correction (−0.03 within-subject).
 imagery is present but transfers poorly across people, which is where
 per-person calibration helps.
 
-**Next, in priority order**: re-validate on the 2026 Graz + BrainHero data
+**Next, in priority order**: the identity-integration loops
+(`docs/superpowers/specs/2026-10-05-identity-integration-design.md`): a gated
+pooled fallback (A), one shared network with per-person adapters (B) and
+identity as a network input (C), judged across days on 17 dev people and
+confirmed once on 8 locked holdout people. Then re-validate on the 2026 Graz + BrainHero data
 (47 channels incl. EOG/EMG, 3 classes) once released; there, refit the
 step-6 coefficients on a leave-one-calibration-session-out bank (across a day
 gap the EEGNet expert becomes over-confident and the best Riemannian weight
@@ -86,6 +97,10 @@ the full pipeline (only the step-6 gain has 3 seeds).
 | `submission.py` | the uploaded code: `Solver(CompetSolver)` + `FingerprintMixture`; maps evaluation channels to training channels **by name** and fails loudly on missing channels, `n_times` or `n_classes` mismatches |
 | `train_mixture.py` | trains pooled EEGNet, experts, fingerprint, Riemannian experts and combiner on Dreyer 2023, packages `<out>/track2_dreyer_sim.zip` (`submission.py`, `mixture.pt`, `config.json` at the ZIP root), and scores the shipped code path with ablations. `--reuse-eegnet` loads the EEGNet experts of an existing `mixture.pt`; `--fingerprint eegnet` / `--no-riemann-experts` build the older designs |
 | `riemann_parts.py` | training side of the covariance models: fits loop A's fingerprint and loop B's per-person Riemannian experts with scipy / pyriemann / sklearn and exports them as tensors for `submission.py`; holds the C3 coefficients |
+| `models.py` | `make_model`: EEGNet or ShallowFBCSPNet with time constants scaled to the sampling rate |
+| `reve_parts.py` | training side of a frozen-REVE probe stream (resampling, offline encoder, heads); not shipped |
+| `bench/` | leakage-free benchmark-page solvers (ShallowFBCSPNet, REVE probe, filter-bank Riemann; trained on the warm-up train split) |
+| `tests/` | `unittest` tests: `python -m unittest discover -s track2/tests -t .` |
 | `classical_experts.py` | the original per-person CSP / Riemannian expert evaluation (plain averaging; superseded by step 6) |
 | `results/` | per-seed results |
 

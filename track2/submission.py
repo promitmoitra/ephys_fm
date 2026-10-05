@@ -30,6 +30,8 @@ pipelines they were fitted with (track2/riemann_parts.py).
 """
 
 import json
+import os
+from pathlib import Path
 
 import torch
 from torch import nn
@@ -129,6 +131,102 @@ class LogLinearCombiner(nn.Module):
         return torch.log_softmax(z, -1)
 
 
+class PortfolioCombiner(nn.Module):
+    """N-stream reliability-weighted log-linear pooling (loop C):
+    z = Σ_s w_s·log p_s + (c0 + c1·(rel − 0.5))·log p_riemann + class_bias."""
+
+    def __init__(self, n_streams, n_people, n_classes):
+        super().__init__()
+        d = torch.float64
+        self.register_buffer("w", torch.zeros(n_streams, dtype=d))
+        self.register_buffer("c", torch.zeros(2, dtype=d))
+        self.register_buffer("class_bias", torch.zeros(n_classes, dtype=d))
+        self.register_buffer("rel", torch.zeros(n_people, dtype=d))
+
+    def forward(self, neural, logp_riemann):
+        z = sum(w * lp.to(self.w.dtype) for w, lp in zip(self.w, neural))
+        wc = (self.c[0] + self.c[1] * (self.rel - 0.5))[None, :, None]
+        return torch.log_softmax(z + wc * logp_riemann + self.class_bias, -1)
+
+
+# ShallowFBCSPNet time constants (braindecode defaults assume 250 Hz), rescaled to sfreq;
+# the same numbers as track2/models.py, which this self-contained file cannot import.
+_SHALLOW_REF = dict(filter_time_length=25, pool_time_length=75, pool_time_stride=15)
+
+
+def _shallow(n_chans, n_classes, n_times, sfreq):
+    from braindecode.models import ShallowFBCSPNet
+    s = sfreq / 250.0
+    kw = {k: max(1, int(round(v * s))) for k, v in _SHALLOW_REF.items()}
+    return ShallowFBCSPNet(n_chans=n_chans, n_outputs=n_classes, n_times=n_times,
+                           final_conv_length="auto", **kw)
+
+
+def standardize_clip(X, clip=15.0):
+    """Per-window, per-channel z-score clipped at ±clip SD (REVE's pretraining input)."""
+    mu = X.mean(-1, keepdim=True)
+    sd = X.std(-1, keepdim=True).clamp_min(1e-6)
+    return ((X - mu) / sd).clamp(-clip, clip)
+
+
+def load_reve_encoder(positions_dir, _constructor=None):
+    """Frozen REVE from the pre-staged Hugging Face cache, fully offline.
+
+    braindecode's REVE reads its position bank from $REVE_POSITIONS_PATH/reve_positions.json
+    when it is constructed; the submission ships that file, plus reve_kwargs.json (the
+    constructor arguments probe P0 found necessary, possibly {})."""
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["REVE_POSITIONS_PATH"] = str(positions_dir)
+    if _constructor is None:
+        from braindecode.models import REVE
+        kw_file = Path(positions_dir) / "reve_kwargs.json"
+        kwargs = json.loads(kw_file.read_text()) if kw_file.exists() else {}
+
+        def _constructor():
+            # local_files_only: huggingface_hub reads HF_HUB_OFFLINE once at import (before
+            # this function runs), so the env var alone would not stop network attempts.
+            return REVE.from_pretrained("brain-bzh/reve-base", local_files_only=True, **kwargs)
+    enc = _constructor().eval()
+    for p in enc.parameters():
+        p.requires_grad_(False)
+    return enc
+
+
+class ReveProbe(nn.Module):
+    """Frozen REVE encoder + per-participant linear heads (loop C); forward -> (B, K, C)."""
+
+    def __init__(self, encoder, n_people, n_classes, n_chans, n_times, n_out, emb_dim=512):
+        super().__init__()
+        self.encoder = encoder           # not in this module's state dict (frozen, cached)
+        self.register_buffer("resample", torch.zeros(n_times, n_out))
+        self.register_buffer("pos", torch.zeros(n_chans, 3))
+        d = torch.float64
+        self.register_buffer("mu", torch.zeros(emb_dim, dtype=d))
+        self.register_buffer("sd", torch.ones(emb_dim, dtype=d))
+        self.register_buffer("weight", torch.zeros(n_people, n_classes, emb_dim, dtype=d))
+        self.register_buffer("bias", torch.zeros(n_people, n_classes, dtype=d))
+
+    def state_dict(self, *args, **kwargs):
+        sd = super().state_dict(*args, **kwargs)
+        return {k: v for k, v in sd.items() if not k.startswith("encoder.")}
+
+    def load_state_dict(self, state, strict=True):
+        """The frozen encoder is not in the shipped state; every probe buffer must be."""
+        result = super().load_state_dict(state, strict=False)
+        missing = [k for k in result.missing_keys if not k.startswith("encoder.")]
+        if strict and (missing or result.unexpected_keys):
+            raise RuntimeError(f"ReveProbe state: missing {missing}, "
+                               f"unexpected {result.unexpected_keys}")
+        return result
+
+    def forward(self, X):
+        x = standardize_clip(X.to(self.resample.dtype) @ self.resample)
+        f = self.encoder(x, pos=self.pos.expand(len(x), -1, -1), return_features=True)
+        z = (f["features"].mean(dim=(1, 2)).to(self.mu.dtype) - self.mu) / self.sd
+        logits = torch.einsum("bd,kcd->bkc", z, self.weight) + self.bias
+        return torch.log_softmax(logits, -1)
+
+
 # --------------------------------------------------------------------------
 # The mixture
 # --------------------------------------------------------------------------
@@ -137,7 +235,8 @@ class FingerprintMixture(nn.Module):
     """Fingerprint-weighted mixture of per-participant experts."""
 
     def __init__(self, n_chans, n_times, n_classes, n_experts, channel_index=None,
-                 fingerprint="eegnet", n_bands=6, riemann_n_times_out=None):
+                 fingerprint="eegnet", n_bands=6, riemann_n_times_out=None, shallow=False,
+                 reve_encoder=None, n_reve_out=None, combiner="C3", sfreq=120.0):
         super().__init__()
         self.fingerprint_kind = fingerprint
         if fingerprint == "eegnet":
@@ -149,11 +248,28 @@ class FingerprintMixture(nn.Module):
         self.experts = nn.ModuleList(
             EEGNet(n_chans=n_chans, n_outputs=n_classes, n_times=n_times)
             for _ in range(n_experts))
+        self.shallow_experts = nn.ModuleList(
+            _shallow(n_chans, n_classes, n_times, sfreq) for _ in range(n_experts)
+        ) if shallow else nn.ModuleList()
+        self.reve = (ReveProbe(reve_encoder, n_experts, n_classes, n_chans, n_times, n_reve_out)
+                     if reve_encoder is not None else None)
+        self.combiner_kind = combiner
+        if combiner == "C3" and (shallow or reve_encoder is not None):
+            raise ValueError("extra expert streams are only combined by the 'portfolio' combiner; "
+                             "C3 would compute and then ignore them")
         self.riemann = self.combiner = None
         if riemann_n_times_out is not None:
             self.riemann = RiemannExperts(n_experts, n_chans, n_times,
                                           riemann_n_times_out, n_classes)
-            self.combiner = LogLinearCombiner(n_experts, n_classes)
+            if combiner == "C3":
+                self.combiner = LogLinearCombiner(n_experts, n_classes)
+            elif combiner == "portfolio":
+                n_streams = 1 + int(shallow) + int(reve_encoder is not None)
+                self.combiner = PortfolioCombiner(n_streams, n_experts, n_classes)
+            else:
+                raise ValueError(f"unknown combiner {combiner!r}")
+        elif combiner != "C3" or shallow or reve_encoder is not None:
+            raise ValueError("extra expert streams need the Riemannian experts and a combiner")
         # Reorders the evaluation channels into the training order.
         self.register_buffer(
             "channel_index",
@@ -162,11 +278,20 @@ class FingerprintMixture(nn.Module):
             persistent=False)
 
     def expert_logp(self, X):
-        """Per-participant class log-probabilities (B, K, C), before routing."""
-        logp = torch.stack([torch.log_softmax(e(X), dim=1) for e in self.experts], dim=1)
-        if self.riemann is not None:
-            logp = self.combiner(logp, self.riemann(X))
-        return logp
+        """Per-participant class log-probabilities (B, K, C), before routing.
+
+        Neural streams in the combiner's order: EEGNet, ShallowFBCSPNet, REVE."""
+        neural = [torch.stack([torch.log_softmax(e(X), 1) for e in self.experts], 1)]
+        if len(self.shallow_experts):
+            neural.append(torch.stack([torch.log_softmax(e(X), 1)
+                                       for e in self.shallow_experts], 1))
+        if self.reve is not None:
+            neural.append(self.reve(X))
+        if self.riemann is None:
+            return neural[0]
+        if self.combiner_kind == "C3":
+            return self.combiner(neural[0], self.riemann(X))
+        return self.combiner(neural, self.riemann(X))
 
     def forward(self, X):
         """Mixture class probabilities, (B, n_classes)."""
@@ -194,18 +319,32 @@ def build_model(meta, config, state=None):
         raise ValueError(f"n_times {meta['n_times']} != trained {config['n_times']}")
     if meta["n_classes"] != config["n_classes"]:
         raise ValueError(f"n_classes {meta['n_classes']} != trained {config['n_classes']}")
+    if "sfreq" in config and "sfreq" in meta and abs(meta["sfreq"] - config["sfreq"]) > 1e-6:
+        raise ValueError(f"sfreq {meta['sfreq']} != trained {config['sfreq']}")
     use_riemann = config.get("riemann_experts", False)
+    encoder = load_reve_encoder(meta["submission_dir"]) if config.get("reve_probe") else None
     model = FingerprintMixture(
         n_chans=len(train_chs), n_times=config["n_times"],
         n_classes=config["n_classes"], n_experts=len(config["experts"]),
         channel_index=[eval_chs.index(c) for c in train_chs],
         fingerprint=config.get("fingerprint", "eegnet"),
         n_bands=config.get("fingerprint_n_bands", 6),
-        riemann_n_times_out=config["riemann_n_times_out"] if use_riemann else None)
+        riemann_n_times_out=config["riemann_n_times_out"] if use_riemann else None,
+        shallow=config.get("shallow_experts", False), reve_encoder=encoder,
+        n_reve_out=config.get("reve_n_out"), combiner=config.get("combiner", "C3"),
+        sfreq=config.get("sfreq", 120.0))
     if state is not None:
         model.fingerprint.load_state_dict(state["fingerprint"])
         for expert, sd in zip(model.experts, state["experts"]):
             expert.load_state_dict(sd)
+        shallow_sd = state.get("shallow_experts", [])
+        if len(shallow_sd) != len(model.shallow_experts):
+            raise ValueError(f"config expects {len(model.shallow_experts)} shallow experts, "
+                             f"the state holds {len(shallow_sd)}")
+        for expert, sd in zip(model.shallow_experts, shallow_sd):
+            expert.load_state_dict(sd)
+        if model.reve is not None:
+            model.reve.load_state_dict(state["reve"])
         if use_riemann:
             model.riemann.load_state_dict(state["riemann"])
             model.combiner.load_state_dict(state["combiner"])
