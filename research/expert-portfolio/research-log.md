@@ -16,3 +16,10 @@
 - Protocol 02: sim2 (honest) E+T+S − E+T = −0.005 [−0.016, +0.004]; E+T − EEGNet = +0.001;
   R4–R6 (upper bound) +0.014. No veto. Neither honest check (sim2, BNCI) shows ShallowFBCSPNet
   helping; asking the user before packaging (Task 10).
+
+## 2026-10-05
+
+- **User decision:** ShallowFBCSPNet not shipped (honest checks sim2 −0.005, BNCI −0.004). Task 10
+  (packaging) skipped; the question moves to identity-integration option B.
+- **Loop C concluded.** Findings written; `track2/README.md` marks R4–R6 rows as upper bounds and
+  adds the sim2 row; README experiments row added.

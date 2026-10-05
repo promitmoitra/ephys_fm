@@ -3,7 +3,7 @@ project:
   question: >
     Do a frozen-REVE probe and ShallowFBCSPNet experts earn weight next to the shipped EEGNet and
     Riemannian experts, on Dreyer (dev) and across days (BNCI 2014-001)?
-  status: active
+  status: concluded
   started: "2026-10-02"
   worktree: .claude/worktrees/t2-portfolio
   branch: exp/expert-portfolio
