@@ -1,5 +1,9 @@
 # Handoff: Track 2 autoresearch loops
 
+> **Status: concluded.** Both loops ran 30 Sep – 1 Oct 2026 and merged (#7, #8); their results
+> ship in `track2/submission.py` (#9). This brief stays as the record of their protocol. Thread
+> counts and timings below are from the machine the loops ran on.
+
 Two parallel research loops improve the Track 2 (BCI decoding) submission. Each runs in a fresh
 Claude Code session inside its own worktree (see `CLAUDE.md`). Read this whole brief, then
 `track2/README.md` ("Current best model"), before starting.
@@ -11,20 +15,20 @@ Claude Code session inside its own worktree (see `CLAUDE.md`). Read this whole b
 
 ## Start a loop
 
-From the main checkout (`/home/promit/Documents/ephys_fm`, always on `main`):
+From the root of your main checkout (always on `main`):
 
 ```bash
 git pull --ff-only origin main
 git worktree add .claude/worktrees/t2-fingerprint -b exp/fingerprint-model main   # loop B: t2-expert-weights / exp/expert-weights
 for d in data external .venv outputs submissions; do
-  ln -s /home/promit/Documents/ephys_fm/$d .claude/worktrees/t2-fingerprint/$d
+  ln -s "$PWD/$d" .claude/worktrees/t2-fingerprint/$d
 done
 cd .claude/worktrees/t2-fingerprint && claude
 ```
 
 Then prompt: *"Read docs/handoff/track2-research-loops.md and run loop A with the autoresearch
 skill."* Invoke the skill as `autoresearch:autoresearch` (the bare `0-autoresearch-skill` name does
-not resolve). Set up its 20-minute `/loop` heartbeat first; it lives only as long as the session.
+not resolve). It is a Claude Code plugin installed separately; it does not ship with this repo. Set up its 20-minute `/loop` heartbeat first; it lives only as long as the session.
 
 ## Why these two loops
 
@@ -136,7 +140,7 @@ pre-registered candidates.
   `findings.md`, `experiments/<hypothesis>/…`, `to_human/`) under `research/` in your worktree.
   Write run artifacts to `outputs/t2-fingerprint/` or `outputs/t2-expert-weights/`; only read
   `data/`.
-- **CPU:** 8 threads, no GPU, 16 GB RAM, shared by both loops: use `--threads 4` /
+- **CPU** (the machine the loops ran on): 8 threads, no GPU, 16 GB RAM, shared by both loops: use `--threads 4` /
   `torch.set_num_threads(4)` each. At 8 threads a pooled Dreyer EEGNet epoch took ~19 s (100
   epochs ≈ 31 min) and a fingerprint epoch ~2.3 s; expect slower at 4 threads.
 - **Long jobs:** harness background tasks are killed after ~30 min. Launch with
