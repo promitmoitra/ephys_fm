@@ -16,3 +16,12 @@ __pycache__/
 
 # Claude Code: share project skills, keep per-machine settings local
 .claude/settings.local.json
+
+# Worktrees for parallel lines of work (CLAUDE.md), and each worktree's symlinks
+# to the main checkout's shared folders: "dir/" patterns don't match symlinks
+.claude/worktrees/
+/data
+/outputs
+/external
+/.venv
+/submissions

@@ -1,23 +1,29 @@
 # ephys_fm: working agreement for agents
 
-Several agents work on this repository at the same time, each in its own git worktree. Follow
-this protocol before running any git command.
+Several people and agents work on this repository at the same time, each line of work in its own
+git worktree. Follow this protocol before running any git command. New collaborators: start with
+[`docs/onboarding.md`](docs/onboarding.md).
 
 ## Where to work
 
+Paths are relative to your main checkout (your clone of the repository; the first entry of
+`git worktree list`).
+
 | Directory | Branch | Line of work |
 |---|---|---|
-| `/home/promit/Documents/ephys_fm` (main checkout) | `main`, always | Integration and packaging submissions only |
-| `.claude/worktrees/track2` | currently `exp/dreyer-eog` | Track 2 (BCI decoding) competition work |
-| `.claude/worktrees/data-atlas` | `research/data-atlas` | Data atlas research track ([vision](docs/atlas/vision.md)) |
-| `.claude/worktrees/t2-fingerprint` | `exp/fingerprint-model` | Track 2 autoresearch loop A: a better per-window fingerprint (person ID) model |
-| `.claude/worktrees/t2-portfolio` | `exp/expert-portfolio` | Track 2 loop C: expert portfolio (REVE probe, ShallowFBCSPNet) behind a learned combiner ([spec](docs/superpowers/specs/2026-10-02-expert-portfolio-design.md)) |
+| main checkout | `main`, always | Integration and packaging submissions only |
+| `.claude/worktrees/track2` | `track2/<topic>`, `exp/<topic>` | Track 2 (BCI decoding) competition work |
+| `.claude/worktrees/data-atlas` | `research/data-atlas` | Data atlas research track (vision: `docs/atlas/vision.md` on `research/data-atlas`, not yet on `main`) |
 
-The two Track 2 research loops run in parallel with a shared heartbeat. Each writes run artifacts
-to its own subfolder of the shared `outputs/` (`outputs/t2-fingerprint/`, `outputs/t2-expert-weights/`)
-and only reads the shared `data/` caches.
+Each line of work writes run artifacts to its own subfolder of the shared `outputs/` and only reads
+the shared `data/` caches.
 
-`git worktree list` shows the current set.
+Concluded: the Track 2 research loops A (`exp/fingerprint-model`) and B (`exp/expert-weights`) and
+their integration into `submission.py` (`track2/integrate-fp-c3`) merged in #7, #8 and #9. Their
+brief is `docs/handoff/track2-research-loops.md`; their local artifacts stay in
+`outputs/t2-fingerprint/`, `outputs/t2-expert-weights/` and `outputs/t2-integration/`.
+
+`git worktree list` shows the current set on your machine.
 
 ## Rules
 
@@ -29,12 +35,11 @@ and only reads the shared `data/` caches.
 4. Before every commit, run `git branch --show-current` and check it is your worktree's branch.
 5. Branch names: `exp/<topic>`, `track<N>/<topic>`, `research/<topic>`, `setup/<topic>`,
    `docs/<topic>`. Integrate into `main` through a GitHub pull request.
-6. A new line of work gets its own worktree, created from the main checkout:
+6. A new line of work gets its own worktree, created from the root of the main checkout:
    `git worktree add .claude/worktrees/<name> -b <prefix>/<topic> main`. Then link the shared,
-   git-ignored folders it needs to the main checkout's copies, one command per folder
-   (`data`, `external`, `.venv`, `outputs`, `submissions`):
-   `ln -s /home/promit/Documents/ephys_fm/<dir> .claude/worktrees/<name>/<dir>`.
-   `.git/info/exclude` already lists `.claude/worktrees/` and those names. Never copy `data/` (30+ GB).
+   git-ignored folders it needs to the main checkout's copies:
+   `for d in data external .venv outputs submissions; do ln -s "$PWD/$d" .claude/worktrees/<name>/$d; done`.
+   `.gitignore` covers `.claude/worktrees/` and these links. Never copy `data/` (30+ GB).
 7. A new experiment within a line of work is a new branch inside that worktree
    (`git switch -c exp/<topic>`).
 8. The competition venv (`.venv` in the main checkout) is shared through symlinks. Install
