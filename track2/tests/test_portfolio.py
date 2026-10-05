@@ -106,3 +106,22 @@ class TestPortfolio(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFingerprintTwoClasses(unittest.TestCase):
+    def test_two_class_fingerprint_exports_two_logits(self):
+        """sklearn's binary LR has one weight row; the export must still give 2 logits that
+        reproduce its probabilities (2 enrolled people, or a 2-class page solver)."""
+        import riemann_parts
+        from submission import FBFingerprint
+        rng = np.random.default_rng(0)
+        X = rng.standard_normal((60, 6, 480)).astype(np.float32)
+        lab = np.repeat([0, 1], 30)
+        X[lab == 1] *= np.linspace(0.5, 2.0, 6)[None, :, None].astype(np.float32)
+        st = riemann_parts.fit_fingerprint(X, lab, 120.0)
+        fp = FBFingerprint(len(riemann_parts.FP_BANDS), 6, 480, 2)
+        fp.load_state_dict(st)
+        with torch.inference_mode():
+            p = torch.softmax(fp(torch.from_numpy(X)), 1).numpy()
+        self.assertEqual(p.shape, (60, 2))
+        self.assertGreater((p.argmax(1) == lab).mean(), 0.9)

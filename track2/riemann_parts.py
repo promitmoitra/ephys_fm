@@ -57,6 +57,9 @@ def fit_fingerprint(X, person, sfreq, bands=FP_BANDS, C=1.0):
     lr = LogisticRegression(C=C, max_iter=5000).fit(sc.transform(F), person)
     weight = lr.coef_ / sc.scale_
     bias = lr.intercept_ - weight @ sc.mean_
+    if weight.shape[0] == 1:           # sklearn binary: one logit for class 1 → logits [0, z]
+        weight = np.vstack([np.zeros_like(weight), weight])
+        bias = np.concatenate([[0.0], bias])
     f32 = torch.float32
     return {"filters": torch.as_tensor(np.stack(filters), dtype=f32),
             "cref_isqrt": torch.as_tensor(np.stack(crefs), dtype=f32),
