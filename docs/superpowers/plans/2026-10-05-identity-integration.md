@@ -31,10 +31,15 @@ autoresearch loops that each test one way of using the fingerprint's identity mo
   branch below starts from that `main`.
 - **Primary metric:** cross-day test-session balanced accuracy, end to end with the **real**
   fingerprint (no oracle), as per-person differences against **row 2** (current design: E+T, C3
-  as shipped, soft-routed). Pooled over 25 people; person-bootstrap 95% CI, 5,000 resamples, rng
-  seed 0; person score = mean over seeds 0, 1, 2.
-- **Adoption:** pooled gain ≥ 0.005 with CI lower bound > 0, **and** sim2 (Dreyer, seed 0) not
-  worse than row 2 by more than 0.01. At most one option ships.
+  as shipped, soft-routed). Pooled over the **17 dev people**; person-bootstrap 95% CI, 5,000
+  resamples, rng seed 0; person score = mean over seeds 0, 1, 2.
+- **Holdout:** the 8 people in `docs/superpowers/specs/2026-10-05-identity-integration-holdout.json`
+  are never loaded by any loop (`data.load(name)` defaults to `part="dev"`). They are used once, in
+  Task 9, for the chosen candidate only.
+- **Candidate (dev):** pooled gain ≥ 0.005 with CI lower bound > 0, **and** sim2 (Dreyer, seed 0)
+  not worse than row 2 by more than 0.01.
+- **Adoption (holdout, Task 9, once):** the single chosen candidate's holdout mean gain ≥ +0.005.
+  At most one option ships.
 - **No leakage:** learned integration parameters are fitted on calibration data or
   leave-one-dataset-out (LODO), never on the test sessions being scored. Protocols are committed
   before their results.
@@ -79,7 +84,8 @@ BNCI 2014-001 (6 runs) and Zhou 2016 (4 session×run units) use their real runs.
    the pooled model; C's code equals the dropout (uniform) code it was trained with. Tests in
    Tasks 6 and 8.
 5. **Seed / dataset bookkeeping.** Expected: the person score is the mean over the 3 seeds before
-   pooling over 25 people, and people are never matched across datasets. Test in Task 3.
+   pooling over people (17 dev, or the 8 holdout once), and people are never matched across
+   datasets. Test in Task 3.
 
 ---
 
@@ -112,7 +118,9 @@ Each loop runs its own tests the same way from its `research/<loop>/tests`.
 
 **Interfaces:**
 - Produces:
-  - `load(name: str) -> dict`, with `name ∈ {"bnci2014", "bnci2015", "zhou2016"}` and keys:
+  - `load(name: str, part: str = "dev") -> dict`, with `name ∈ {"bnci2014", "bnci2015",
+    "zhou2016"}` and `part ∈ {"dev", "holdout", "all"}` (people from the locked holdout JSON). The
+    dict's `name` is `name` for dev and `f"{name}_{part}"` otherwise, so banks never collide. Keys:
     - `X (n, chans, 480) float32`, `y (n,) int` in 0..C−1;
     - `person (n,) int` in 0..K−1, `unit (n,) int` (calibration run unit; −1 outside calibration);
     - `calib`, `val`, `test`: bool masks (`val ⊂ calib`);
@@ -149,12 +157,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import data  # noqa: E402
 
 EXPECT = {"bnci2014": (9, 4, 22), "bnci2015": (12, 2, 13), "zhou2016": (4, 3, 14)}
+DEV_K = {"bnci2014": 6, "bnci2015": 8, "zhou2016": 3}
 
 
 class TestData(unittest.TestCase):
+    def test_dev_part_excludes_the_holdout_people(self):
+        hold = data.holdout()
+        for name, K in DEV_K.items():
+            d = data.load(name)                                 # part="dev" is the default
+            self.assertEqual(len(d["people"]), K, name)
+            self.assertFalse(set(d["people"].tolist()) & set(hold[name]), name)
+            self.assertEqual(d["name"], name)
+            h = data.load(name, part="holdout")
+            self.assertEqual(sorted(h["people"].tolist()), sorted(hold[name]))
+            self.assertEqual(h["name"], f"{name}_holdout")
+
     def test_shapes_and_masks(self):
         for name, (K, C, chans) in EXPECT.items():
-            d = data.load(name)
+            d = data.load(name, part="all")
             self.assertEqual((len(d["people"]), d["n_classes"], d["X"].shape[1]), (K, C, chans), name)
             self.assertEqual(d["X"].shape[2], 480)
             self.assertFalse((d["calib"] & d["test"]).any(), name)
@@ -167,14 +187,14 @@ class TestData(unittest.TestCase):
                 self.assertGreaterEqual(len(np.unique(d["unit"][m & d["calib"]])), 2, (name, k))
 
     def test_single_run_person_split_in_halves(self):
-        d = data.load("bnci2015")
+        d = data.load("bnci2015", part="all")
         m = (d["person"] == 0) & d["calib"]
         self.assertEqual(sorted(np.unique(d["unit"][m]).tolist()), [0, 1])
         self.assertEqual((d["unit"][m] == 0).sum(), (d["unit"][m] == 1).sum())
         self.assertTrue((d["val"][m] == (d["unit"][m] == 1)).all())   # the last unit is val
 
     def test_zhou_calibrates_on_two_sessions(self):
-        d = data.load("zhou2016")
+        d = data.load("zhou2016", part="all")
         raw = np.load(data.PATHS["zhou2016"], allow_pickle=True)
         self.assertEqual(sorted(np.unique(raw["session"][d["calib"]]).tolist()), [0, 1])
         self.assertEqual(np.unique(raw["session"][d["test"]]).tolist(), [2])
@@ -210,10 +230,20 @@ PATHS = {
 SPLITS = {"bnci2014": ([0], 1), "bnci2015": ([0], 1), "zhou2016": ([0, 1], 2)}
 DATASETS = tuple(PATHS)
 SFREQ = 120.0
+HOLDOUT = REPO / "docs" / "superpowers" / "specs" / "2026-10-05-identity-integration-holdout.json"
 
 
-def load(name):
-    raw = np.load(PATHS[name], allow_pickle=True)
+def holdout():
+    import json
+    return json.loads(HOLDOUT.read_text())["holdout"]
+
+
+def load(name, part="dev"):
+    full = np.load(PATHS[name], allow_pickle=True)
+    keep = {"dev": ~np.isin(full["subject"], holdout()[name]),
+            "holdout": np.isin(full["subject"], holdout()[name]),
+            "all": np.ones(len(full["subject"]), bool)}[part]
+    raw = {k: full[k][keep] for k in ("X", "task", "subject", "session", "run")}
     cal_sessions, test_session = SPLITS[name]
     subj, ses, run = raw["subject"], raw["session"], raw["run"]
     people = np.unique(subj)
@@ -235,7 +265,8 @@ def load(name):
         val[idx] = unit[idx] == unit[idx].max()
     return {"X": raw["X"].astype(np.float32), "y": y, "person": person, "unit": unit,
             "calib": calib, "val": val, "test": test, "people": people,
-            "n_classes": int(y.max()) + 1, "sfreq": SFREQ, "name": name}
+            "n_classes": int(y.max()) + 1, "sfreq": SFREQ,
+            "name": name if part == "dev" else f"{name}_{part}"}
 
 
 def load_dreyer_sim2():
@@ -258,7 +289,10 @@ def load_dreyer_sim2():
 - [ ] **Step 4: Run the tests**
 
 Run: `.venv/bin/python -W ignore -m unittest discover -s research/integration-harness/tests -v`
-Expected: 3 tests OK.
+Expected: 4 tests OK.
+
+Class labels are mapped with `np.unique(raw["task"])` on the loaded part, so a part must contain
+every class. Every person in all three datasets has every class, so this holds.
 
 - [ ] **Step 5: Commit**
 
@@ -814,7 +848,7 @@ def main():
         rows.append(f"| {name} | {len(r['current'])} | {r['fp_top1']:.3f} | {r['pooled'].mean():.3f} | "
                     f"{r['current'].mean():.3f} | {r['oracle'].mean():.3f} |")
     cmp = metrics.pooled_comparison({n: (out[n]["current"], out[n]["pooled"]) for n in data.DATASETS})
-    rows.append(f"\nCurrent − pooled, 25 cross-day people: {cmp['mean']:+.4f} "
+    rows.append(f"\nCurrent − pooled, 17 dev cross-day people: {cmp['mean']:+.4f} "
                 f"[{cmp['ci'][0]:+.4f}, {cmp['ci'][1]:+.4f}], {cmp['better']}/{cmp['worse']}")
     (RES / "references.md").write_text("# Reference rows (balanced accuracy, person mean)\n\n" + "\n".join(rows) + "\n")
     (RES / "references.json").write_text(json.dumps(
@@ -1322,11 +1356,22 @@ def train_conditioned(net, X, y, q, id_dropout=0.2, lr=1e-4, epochs=50, bs=32, s
 
 ---
 
-### Task 9: Final comparison (after all three loops conclude)
+### Task 9: Final comparison and the one holdout confirmation (after all three loops conclude)
 
-- [ ] Collect each loop's adopted-or-not verdict. If more than one option passes, pick the one
-  with the largest pooled gain whose CI lower bound is highest; ties go to the cheaper option
-  (A < B < C).
-- [ ] The chosen option gets its own short plan for integration into `submission.py`, followed
-  by the offline kit contract check. If none pass, record that the current integration stands,
-  and why.
+- [ ] **Step 1: Pick on dev.** Collect each loop's dev verdict (candidate or not). If several are
+  candidates, choose the one with the highest dev CI lower bound (ties → cheaper: A < B < C). If
+  none, record that the current integration stands, and stop here; the holdout stays unused.
+- [ ] **Step 2: Pre-register (commit before running).**
+  `research/integration-harness/experiments/holdout-confirm/protocol.md` names:
+  - the one candidate, with its exact variant and parameters, fitted on all three datasets' dev
+    people;
+  - the comparison against row 2 on the 8 holdout people;
+  - the adoption bar (holdout mean gain ≥ +0.005; CI reported, not required);
+  - the BNCI 2015-001 session 1 → 3 check for people 8–11 (reported).
+- [ ] **Step 3: Rebuild the shared parts with everyone.**
+  `pipeline.run(data.load(name, part="all"), seed, …)` for seeds 0–2, so the fingerprint and
+  pooled model know all people, as the sealed phase would. This writes `bank_{name}_all_seed{s}.npz`.
+  Then apply the candidate and score **only** the holdout people, plus row 2 on them.
+- [ ] **Step 4: Decide and record.** Adopt if the bar is met. The adopted option gets its own
+  short plan for `submission.py` integration and the offline kit contract check. Either way,
+  commit the result with its CI, and update `track2/README.md`.

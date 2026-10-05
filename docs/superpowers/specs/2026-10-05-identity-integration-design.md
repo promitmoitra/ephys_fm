@@ -31,20 +31,42 @@ autoresearch loop.
 ## Goal and success criterion
 
 **Primary:** robustness to **cross-day drift**, the sealed phase's regime. It is measured end to
-end with the fingerprint's real errors (no oracle identity). An option is **adopted** if, pooled
-over the 25 cross-day people, its gain over the current design is ≥ 0.005 balanced accuracy with
-a person-bootstrap 95% CI excluding zero, and it is not worse than the current design on Dreyer
-sim2 by more than 0.01. At most one option ships.
+end with the fingerprint's real errors (no oracle identity).
+
+**Two stages, so that an untouched test remains** (amendment, 2026-10-05, before any code):
+
+1. **Dev decision (17 people).** The loops iterate on the 17 dev people only. An option becomes a
+   **candidate** if, pooled over those 17, its gain over the current design is ≥ 0.005 balanced
+   accuracy with a person-bootstrap 95% CI excluding zero, and it is not worse than the current
+   design on Dreyer sim2 by more than 0.01. If several options are candidates, the one with the
+   highest CI lower bound on dev is chosen (ties → cheaper: A < B < C).
+2. **Holdout confirmation (8 people, used once).** The 8 holdout people
+   (`2026-10-05-identity-integration-holdout.json`) are never loaded by any loop. After the loops
+   conclude, only the chosen candidate is run on them, once, against the current design. It is
+   **adopted** if its holdout mean gain is ≥ +0.005. The CI is reported, but not required: 8 people
+   cannot resolve it. The holdout never chooses between options.
+
+At most one option ships.
 
 ## Section 1: the shared evaluation (binding for A, B and C)
 
 ### Datasets (cached, kit format: 120 Hz, 4-s windows)
 
-| Dataset | People | Classes | Channels | Sessions | Calibration → test |
+| Dataset | People (dev + holdout) | Classes | Channels | Sessions | Calibration → test |
 |---|---|---|---|---|---|
-| BNCI 2014-001 | 9 | 4 | 22 | 2 | session 1 → session 2 |
-| BNCI 2015-001 | 12 | 2 | 13 | 2 (3 for some) | session 1 → session 2 (session 3 unused) |
-| Zhou 2016 | 4 | 3 | 14 | 3 | sessions 1–2 → session 3 |
+| BNCI 2014-001 | 9 (6 + 3) | 4 | 22 | 2 | session 1 → session 2 |
+| BNCI 2015-001 | 12 (8 + 4) | 2 | 13 | 2 (3 for some) | session 1 → session 2 (session 3: holdout people only, final check) |
+| Zhou 2016 | 4 (3 + 1) | 3 | 14 | 3 | sessions 1–2 → session 3 |
+
+**Holdout (locked, seed 20261005; `2026-10-05-identity-integration-holdout.json`):**
+- BNCI 2014-001 people 2, 3, 9 (drawn);
+- BNCI 2015-001 people 8, 9, 10, 11 (the people with a third session);
+- Zhou 2016 person 1 (drawn).
+
+The loops' banks are built **without** these people: they are absent from the fingerprint's
+classes, the pooled model's data and every expert. The final confirmation rebuilds the shared
+parts with everyone and scores only the holdout people. BNCI 2015-001 session 1 → session 3 for
+people 8–11 is reported as a further, later-day check.
 
 Caches:
 - `data/experiments/tangermann_windows.npz` (BNCI 2014-001);
@@ -73,8 +95,9 @@ Everything is trained on calibration sessions only:
 ### Metrics
 
 - **Primary:** test-session balanced accuracy, as per-person paired differences against row 2,
-  pooled over the 25 people; person-bootstrap 95% CI (5,000 resamples, rng seed 0); 3 seeds for
-  trained parts (person score = mean over seeds).
+  pooled over the 17 dev people (decisions) or the 8 holdout people (the one final
+  confirmation); person-bootstrap 95% CI (5,000 resamples, rng seed 0); 3 seeds for trained parts
+  (person score = mean over seeds).
 - **Per dataset:** the same numbers, reported but not used for adoption (4–12 people each).
 - **Routing diagnostic:** accuracy on test windows the fingerprint gets right vs wrong, per row
   and option.
@@ -86,8 +109,10 @@ Everything is trained on calibration sessions only:
 ### No leakage
 
 Any learned integration parameter is fitted either on calibration data only, or
-**leave-one-dataset-out**: fitted on two datasets' test sessions, scored on the third. It is
-never fitted on the data it is scored on. Each loop commits its protocols before their results.
+**leave-one-dataset-out**: fitted on two datasets' dev test sessions, scored on the third. It is
+never fitted on the data it is scored on, and never on holdout people. For the final
+confirmation, parameters are fitted on all three datasets' dev people. Each loop commits its
+protocols before their results.
 
 ## Section 2: Option A, pooled fallback with confidence gating
 
@@ -170,8 +195,9 @@ never fitted on the data it is scored on. Each loop commits its protocols before
 4. **Order:** A starts first. B and C start in parallel once the harness is on `main`.
 5. **Finish:**
    - Each loop concludes with findings, a report in `research/<loop>/to_human/` and a PR.
-   - A final comparison applies the adoption rule to all three. At most one integration change
-     ships to `submission.py`, followed by the kit contract check (offline).
+   - A final comparison picks at most one candidate on dev (Goal, stage 1). It confirms that one
+     candidate once on the holdout people (stage 2, protocol committed first). Only then does the
+     change ship to `submission.py`, followed by the kit contract check (offline).
 6. **`CLAUDE.md`:** add one row per worktree when it is created; remove it after its merge.
 
 ## Out of scope
