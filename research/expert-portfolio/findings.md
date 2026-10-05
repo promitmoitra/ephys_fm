@@ -32,6 +32,10 @@ bounds.
 - **ShallowFBCSPNet is a near-equal, different model** (dev alone 0.869 vs EEGNet 0.875). It reads
   the early cue-locked window less (early-only 0.749 vs 0.838). On Dreyer's decision data the
   two-CNN ensemble gains, but that gain does not survive fresh people or a day gap.
+- **Cross-subject, without calibration, ShallowFBCSPNet is clearly stronger than EEGNet**: 0.844
+  vs 0.795 (kit EEGNet) on the leakage-free comparison page (`track2/bench/README.md`). Its value
+  is in the pooled model, not as a second per-person expert; option B's ShallowFBCSPNet trunk tests
+  that directly.
 - **REVE, frozen and mean-pooled, is weak** (0.581 alone on Dreyer). Averaging the embedding over
   channels most likely discards the electrode layout that carries left-vs-right imagery. A
   channel-preserving probe was not tested.
