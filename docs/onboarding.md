@@ -52,8 +52,29 @@ released yet; warm-up uses Dreyer 2023 (2-class motor imagery) as a proxy.
    [4](https://www.codabench.org/competitions/17984/#/participate-tab)).
 3. Submit the [registration form](https://forms.gle/p3t2V25nuQtVXyj9A) once, with your Codabench
    email, ticking every track you registered for.
-4. Ask the team leader to add you to the team's Codabench organization. Each person can belong to
-   one team only; submission quotas stay individual, and submissions count for the team.
+4. Send the team leader your Codabench username. The leader invites you to the team's Codabench
+   organization; you receive an email "You have been invited to join <team>" and must click accept
+   while logged in to your own account. Until you accept you are listed as **INVITED** and cannot
+   submit for the team. No email? Check that organization invite emails are allowed in your
+   Codabench notification settings.
+5. **Submit as the team, every time.** The upload form under **My Submissions** has a dropdown to
+   submit as yourself or as an organization; pick the team, or the entry counts as individual. The
+   dropdown appears only after you accept the invite.
+
+Each person can belong to one team only; submission quotas stay individual, and submissions count
+for the team. GitHub access to this repository does not make you a team member on Codabench.
+
+**Team leader, once.** The leader handles the reproducibility audit, the workshop presentation and
+the prize if we win, so pick someone available through December.
+
+1. Complete steps 1–3 above.
+2. Create the organization at
+   [codabench.org/profiles/organization/create](https://www.codabench.org/profiles/organization/create/):
+   **Organization Name** (shown on the leaderboard) and **Organization Email** are what matter;
+   the rest is optional. Save.
+3. On the organization's page, click **Edit**, then **Invite Users**. The invite box searches
+   existing Codabench accounts by username, so teammates need an account first.
+4. Check the member list: everyone should move from INVITED to MEMBER once they accept.
 
 ## 3. Set up your machine
 
