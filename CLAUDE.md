@@ -13,6 +13,7 @@ Paths are relative to your main checkout (your clone of the repository; the firs
 |---|---|---|
 | main checkout | `main`, always | Integration and packaging submissions only |
 | `.claude/worktrees/track2` | `track2/<topic>`, `exp/<topic>` | Track 2 (BCI decoding) competition work |
+| `.claude/worktrees/t2-int-harness` | `exp/integration-harness` | Track 2: shared cross-day harness for the identity-integration loops |
 | `.claude/worktrees/data-atlas` | `research/data-atlas` | Data atlas research track (vision: `docs/atlas/vision.md` on `research/data-atlas`, not yet on `main`) |
 
 Each line of work writes run artifacts to its own subfolder of the shared `outputs/` and only reads
