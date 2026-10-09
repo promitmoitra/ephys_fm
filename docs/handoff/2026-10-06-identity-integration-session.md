@@ -33,11 +33,24 @@ loops, each with its own branch, worktree and workspace:
   by FiLM and trained with identity dropout. Branch `exp/integration-conditioned`, worktree
   `t2-int-conditioned`.
 
+- **D, sequence** (revision 2026-10-09): a batch-level identity prior from neuralprint's Transition
+  Grammar Biometric Prior (`/home/promit/Documents/neuralprint`). Branch `exp/integration-sequence`,
+  worktree `t2-int-sequence`. Spec Section 4b; plan Task 8b.
+  - **Not shippable until the competition organisers confirm** how sealed-phase `predict()`
+    batches are composed (user decision). It relies on consecutive windows of one recording sharing
+    a batch, which is undocumented.
+  - K = 16 and γ = 0.05 are fixed a priori: neuralprint chose them on data that includes our
+    holdout people.
+  - Arm D1 (pooled per-window posteriors, no grammar) tests whether the grammar adds anything
+    beyond pooling.
+- **Open action for the user:** ask the organisers whether sealed-phase `predict()` batches hold
+  consecutive windows from one recording, in order.
+
 **Plan order:**
 1. **Tasks 1–5:** the shared harness, in this worktree. Data loader; pipeline that caches banks to
    `outputs/t2-int-harness/`; metrics and adoption rule; trunk/head split; reference rows; the
    loop hand-off brief; PR.
-2. **Tasks 6–8:** each loop's bootstrap, in its own session and worktree, after the harness PR
+2. **Tasks 6–8b:** each loop's bootstrap, in its own session and worktree, after the harness PR
    merges. The user starts those sessions (`cd .claude/worktrees/<name> && claude`) with the
    prompt in the Task 5 hand-off brief.
 3. **Task 9:** pick the winner on dev; confirm it **once** on the holdout.

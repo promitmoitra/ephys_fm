@@ -48,6 +48,11 @@ end with the fingerprint's real errors (no oracle identity).
 
 At most one option ships.
 
+**Revision 2026-10-09: option D added** (Section 4b): a batch-level identity prior from neuralprint's
+Transition Grammar Biometric Prior. It is evaluated like A, B and C, but **it is not shippable until
+the competition organisers confirm** how sealed-phase `predict()` batches are composed (user
+decision).
+
 ## Section 1: the shared evaluation (binding for A, B and C)
 
 ### Datasets (cached, kit format: 120 Hz, 4-s windows)
@@ -172,7 +177,56 @@ protocols before their results.
 - **Main risk:** overfitting with 4–12 people per dataset; embeddings are per dataset. Report the
   train–test gap.
 
-## Section 5: running A, B and C in parallel
+## Section 4b: Option D, batch-level identity prior (Transition Grammar Biometric Prior)
+
+- **Loop:** `int-sequence` · branch `exp/integration-sequence` · worktree
+  `.claude/worktrees/t2-int-sequence` · workspace `research/integration-sequence/` · artifacts
+  `outputs/t2-int-sequence/`.
+- **Source:** the neuralprint repo (`/home/promit/Documents/neuralprint`, e.g.
+  `experiments/h-bnci2015-transition-fingerprint/code/run_experiment.py`).
+  - Each window's fingerprint tangent features are softly assigned to K covariance "states"
+    (k-means on calibration; soft membership ∝ exp(−γ·distance), γ = 0.05).
+  - A person's grammar is the Dirichlet-smoothed (ε = 1e-3) K × K Markov matrix of expected
+    transitions between consecutive windows.
+  - neuralprint matches a whole 200-window test stream to enrolled grammars by cosine similarity:
+    100% person ID on BNCI 2015-001 and Zhou 2016 across days, 30-day PainLab retest 100% / 0% EER.
+  - **Caveats:**
+    1. Those are 12 (BNCI 2015) and 4 (Zhou) session-level decisions, not per-window accuracy.
+    2. neuralprint's runs used *all* people, including our holdout people. Its K and γ were chosen
+       on data that overlaps our holdout, so **D fixes K = 16 and γ = 0.05 a priori** (neuralprint's
+       M3CV / PainLab settings) and never tunes them on our dev or holdout data. The code is copied
+       into this repo with attribution, not imported.
+- **Integration in Track 2:** `predict(X)` gets a batch of windows (the kit: 64, dataset order, no
+  shuffling; **undocumented**, and the kit says to rely only on `meta` and the batch).
+  - D turns the batch into a prior π(k | batch): a person's evidence is the log-likelihood of the
+    batch's soft state sequence under their calibration grammar, plus (arm D3) the pooled
+    per-window fingerprint log-posteriors.
+  - The routing posterior is then p(k | x, batch) ∝ p(k | x) · π(k | batch)^λ.
+  - **Homogeneity gate:** λ = 0 (pure per-window routing) unless the batch's per-window fingerprint
+    argmax agrees on one person for ≥ 80% of windows. Mixed-person batches, recording boundaries and
+    shuffled order therefore fall back to the current design.
+- **Pre-registered arms:**
+  - D1: pooled per-window posteriors only (no grammar), the baseline for "does the grammar add
+    anything";
+  - D2: grammar only;
+  - D3: both.
+
+  All three are gated; λ is fitted leave-one-dataset-out.
+- **Required robustness tests**, scored like the primary metric:
+  - the kit's batching (64, dataset order);
+  - shuffled windows;
+  - batches mixing two people;
+  - batch sizes 8 and 16.
+
+  **D must never score below row 2 on any of them** (gate check).
+- **Relation to A/B/C:** D improves *who*; A/B/C improve *how identity is used*. The final
+  comparison also scores D combined with the A/B/C winner.
+- **Hypothesis:** across days, where the per-window fingerprint drops (0.79–0.94 with one
+  calibration day), pooling evidence over a batch of one person's windows recovers near-perfect
+  routing. The grammar adds to pooling only if transition structure is more stable across days
+  than mean features.
+
+## Section 5: running A, B, C and D in parallel
 
 1. **Precondition:** loop C (`exp/expert-portfolio`) is concluded and merged into `main`. It
    holds the sim2 option in `train_mixture.py`, `track2/models.py`, the N-stream combiner and
@@ -192,7 +246,7 @@ protocols before their results.
      artifacts under `outputs/<worktree name>/`;
    - its own 20-minute heartbeat in its own Claude Code session, protocols committed before
      results, and ≤ 2 CPU threads.
-4. **Order:** A starts first. B and C start in parallel once the harness is on `main`.
+4. **Order:** A starts first. B, C and D start in parallel once the harness is on `main`.
 5. **Finish:**
    - Each loop concludes with findings, a report in `research/<loop>/to_human/` and a PR.
    - A final comparison picks at most one candidate on dev (Goal, stage 1). It confirms that one

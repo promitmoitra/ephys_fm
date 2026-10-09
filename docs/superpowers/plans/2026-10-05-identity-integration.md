@@ -7,6 +7,9 @@ autoresearch loops that each test one way of using the fingerprint's identity mo
 - **A:** a gated pooled fallback;
 - **B:** one shared network with per-person adapters;
 - **C:** identity as a network input.
+- **D** (revision 2026-10-09): a batch-level identity prior from neuralprint's Transition Grammar
+  Biometric Prior. It is evaluated like A, B and C, but **not shippable until the organisers confirm
+  sealed-phase batch composition**.
 
 **Architecture:**
 - **Phase 0** (`research/integration-harness/`, branch `exp/integration-harness`) trains the
@@ -103,6 +106,7 @@ BNCI 2014-001 (6 runs) and Zhou 2016 (4 session×run units) use their real runs.
 | `research/integration-gate/src/gate.py` (+ tests) | `exp/integration-gate` | Option A |
 | `research/integration-adapters/src/adapters.py` (+ tests) | `exp/integration-adapters` | Option B |
 | `research/integration-conditioned/src/conditioned.py` (+ tests) | `exp/integration-conditioned` | Option C |
+| `research/integration-sequence/src/grammar.py` (+ tests) | `exp/integration-sequence` | Option D (Transition Grammar prior) |
 
 Tests for the harness run with:
 `.venv/bin/python -W ignore -m unittest discover -s research/integration-harness/tests -v`.
@@ -401,6 +405,8 @@ class TestPipeline(unittest.TestCase):
         for k in ("fp_logp", "eeg_logp", "riemann_logp", "pooled_logp", "fp_cv_logp_calib"):
             np.testing.assert_allclose(np.exp(b[k]).sum(-1), 1.0, atol=1e-4, err_msg=k)
         self.assertGreater((b["fp_logp"].argmax(1) == b["person"]).mean(), 0.9)   # identity is easy
+        self.assertEqual(b["fp_feat_test"].shape[0], n)                           # loop D inputs
+        self.assertEqual(b["fp_feat_calib"].shape[0], int(d["calib"].sum()))
 
     def _tmp(self):
         import tempfile
@@ -484,6 +490,8 @@ def run(d, seed, threads, epochs, ft_epochs=50, out_dir=OUT):
     cents = np.stack([z_cal[person[cal] == k].mean(0) for k in range(K)])
     dist = lambda z: np.sqrt(((z[:, None] - cents[None]) ** 2).sum(-1)).min(1) / np.sqrt(z.shape[1])  # noqa: E731
     bank["fp_dist"], bank["fp_dist_ref"] = dist(z_te), np.median(dist(z_cal))
+    bank["fp_feat_test"], bank["fp_feat_calib"] = f_te.astype(np.float32), f_cal.astype(np.float32)
+    torch.save(st, out_dir / f"fp_{d['name']}_seed{seed}.pt")             # loop D
 
     log("fingerprint, leave-one-unit-out posteriors on calibration")
     cal_idx = np.where(cal)[0]
@@ -1356,8 +1364,219 @@ def train_conditioned(net, X, y, q, id_dropout=0.2, lr=1e-4, epochs=50, bs=32, s
 
 ---
 
-### Task 9: Final comparison and the one holdout confirmation (after all three loops conclude)
+### Task 8b: Loop D bootstrap: batch-level identity prior (`int-sequence`)
 
+Run in its own session in `.claude/worktrees/t2-int-sequence` (branch `exp/integration-sequence`).
+Spec: Section 4b. **Not shippable** until the organisers confirm sealed-phase batch composition.
+
+**Files:**
+- Create: `research/integration-sequence/{research-state.yaml, research-log.md, findings.md}`
+- Create: `research/integration-sequence/experiments/00-protocol/protocol.md`
+- Create: `research/integration-sequence/src/grammar.py`, `research/integration-sequence/tests/test_grammar.py`
+
+**Interfaces:**
+- Consumes:
+  - bank keys `fp_feat_calib`, `person_calib`, `unit_calib`, `fp_feat_test`, `fp_logp`,
+    `person`, `y`;
+  - `metrics.c3_logp`, `metrics.route`, `metrics.person_scores`, `metrics.pooled_comparison`.
+- Produces:
+  - `fit_states(Z, K=16, seed=0) -> (mu, sd, centroids)`;
+  - `memberships(Z, mu, sd, centroids, gamma=0.05) -> (n, K)`;
+  - `transition_matrix(W, eps=1e-3) -> (K, K)`;
+  - `grammars(W_cal, person_cal, unit_cal, P) -> (P, K, K)`: per person, pooled over calibration
+    units, never across a unit boundary;
+  - `batch_prior(W_b, fp_logp_b, G, arm) -> (P,)` log-prior, arm ∈ {"D1", "D2", "D3"};
+  - `gate(fp_logp_b, thresh=0.8) -> bool`;
+  - `routed(bank, arm, lam, batches) -> (n, C)` log-probabilities;
+  - `make_batches(n, size, mode, person=None, seed=0) -> list[np.ndarray]`, mode ∈ {"kit",
+    "shuffled", "mixed"}.
+
+- [ ] **Step 1: Protocol 00 (commit first).**
+  - K = 16 and γ = 0.05 fixed a priori (neuralprint's non-overlapping settings); arms D1, D2, D3;
+    λ fitted leave-one-dataset-out on the kit batching.
+  - The robustness suite: kit batches of 64; shuffled; two-person mixed; sizes 8 and 16.
+  - The metric and candidate rule from the spec, plus the gate check: D must not score below row 2
+    in any robustness condition.
+  - Attribution: the grammar code is adapted from neuralprint (commit `fad313c`).
+
+- [ ] **Step 2: Failing tests** `research/integration-sequence/tests/test_grammar.py`:
+```python
+import sys, unittest
+from pathlib import Path
+import numpy as np
+HERE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(HERE / "src"))
+import grammar  # noqa: E402
+
+
+def chain(P, T, rng):
+    s = [0]
+    for _ in range(T - 1):
+        s.append(rng.choice(len(P), p=P[s[-1]]))
+    return np.eye(len(P))[s]
+
+
+class TestGrammar(unittest.TestCase):
+    def test_transition_rows_sum_to_one(self):
+        W = np.random.default_rng(0).dirichlet(np.ones(4), 30)
+        np.testing.assert_allclose(grammar.transition_matrix(W).sum(1), 1, atol=1e-9)
+
+    def test_batch_prior_prefers_the_generating_grammar(self):
+        rng = np.random.default_rng(1)
+        Pa = np.array([[.9, .1, 0, 0], [0, .9, .1, 0], [0, 0, .9, .1], [.1, 0, 0, .9]]) + 1e-3
+        Pb = Pa[:, ::-1].copy()
+        Pa /= Pa.sum(1, keepdims=True); Pb /= Pb.sum(1, keepdims=True)
+        G = np.stack([grammar.transition_matrix(chain(Pa, 400, rng)),
+                      grammar.transition_matrix(chain(Pb, 400, rng))])
+        W = chain(Pa, 64, rng)
+        lp = grammar.batch_prior(W, np.log(np.full((64, 2), .5)), G, arm="D2")
+        self.assertGreater(lp[0], lp[1])
+
+    def test_gate_rejects_mixed_batches(self):
+        a = np.log(np.tile([.9, .1], (32, 1))); b = np.log(np.tile([.1, .9], (32, 1)))
+        self.assertTrue(grammar.gate(a))
+        self.assertFalse(grammar.gate(np.vstack([a, b])))
+
+    def test_lambda_zero_equals_per_window_routing(self):
+        rng = np.random.default_rng(2)
+        n, P, C = 40, 3, 2
+        lsm = lambda z: z - np.log(np.exp(z).sum(-1, keepdims=True))  # noqa: E731
+        bank = {"fp_logp": lsm(rng.standard_normal((n, P))), "eeg_logp": lsm(rng.standard_normal((n, P, C))),
+                "riemann_logp": lsm(rng.standard_normal((n, P, C))), "rel": np.full(P, .7),
+                "fp_feat_test": rng.standard_normal((n, 5)), "y": rng.integers(0, C, n)}
+        st = grammar.fit_states(rng.standard_normal((60, 5)), K=4)
+        G = np.stack([np.full((4, 4), .25)] * P)
+        out = grammar.routed(bank, "D3", 0.0, grammar.make_batches(n, 8, "kit"), st, G)
+        sys.path.insert(0, str(HERE.parents[1] / "integration-harness" / "src"))
+        import metrics
+        np.testing.assert_allclose(out, metrics.route(bank["fp_logp"], metrics.c3_logp(bank)), atol=1e-9)
+
+    def test_mixed_batches_alternate_people(self):
+        person = np.repeat([0, 1], 20)
+        b = grammar.make_batches(40, 8, "mixed", person=person, seed=0)
+        self.assertTrue(all(len(set(person[i].tolist())) == 2 for i in b))
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+Run: `.venv/bin/python -W ignore -m unittest discover -s research/integration-sequence/tests -v`.
+Expected: `ModuleNotFoundError: No module named 'grammar'`.
+
+- [ ] **Step 3: Implement `grammar.py`**
+```python
+"""Option D: batch-level identity prior from a Transition Grammar Biometric Prior.
+
+Adapted from neuralprint (`experiments/h-bnci2015-transition-fingerprint/code/run_experiment.py`,
+commit fad313c): soft k-means states on fingerprint tangent features, Dirichlet-smoothed Markov
+transition grammars. Here a grammar scores the short window sequence inside one predict() batch."""
+import sys
+from pathlib import Path
+import numpy as np
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "integration-harness" / "src"))
+
+
+def fit_states(Z, K=16, seed=0):
+    from sklearn.cluster import KMeans
+    mu, sd = Z.mean(0), Z.std(0) + 1e-9
+    km = KMeans(n_clusters=K, random_state=seed, n_init=10).fit((Z - mu) / sd)
+    return mu, sd, km.cluster_centers_
+
+
+def memberships(Z, mu, sd, centroids, gamma=0.05):
+    d = np.linalg.norm(((Z - mu) / sd)[:, None] - centroids[None], axis=-1)
+    e = np.exp(-gamma * (d - d.min(1, keepdims=True)))          # stable softmax of −γ·d
+    return e / e.sum(1, keepdims=True)
+
+
+def transition_matrix(W, eps=1e-3):
+    if len(W) < 2:
+        return np.full((W.shape[1], W.shape[1]), 1.0 / W.shape[1])
+    M = W[:-1].T @ W[1:] + eps
+    return M / M.sum(1, keepdims=True)
+
+
+def grammars(W_cal, person_cal, unit_cal, P):
+    K = W_cal.shape[1]
+    G = np.zeros((P, K, K))
+    for k in range(P):
+        M = np.full((K, K), 1e-3)
+        for u in np.unique(unit_cal[person_cal == k]):
+            W = W_cal[(person_cal == k) & (unit_cal == u)]
+            if len(W) > 1:
+                M += W[:-1].T @ W[1:]                            # no transition across units
+        G[k] = M / M.sum(1, keepdims=True)
+    return G
+
+
+def batch_prior(W_b, fp_logp_b, G, arm):
+    lp = np.zeros(G.shape[0])
+    if arm in ("D2", "D3") and len(W_b) > 1:
+        T = W_b[:-1].T @ W_b[1:]                                 # expected transition counts
+        lp = lp + (T[None] * np.log(G)).sum((1, 2))
+    if arm in ("D1", "D3"):
+        lp = lp + fp_logp_b.sum(0)
+    return lp - np.logaddexp.reduce(lp)
+
+
+def gate(fp_logp_b, thresh=0.8):
+    top = fp_logp_b.argmax(1)
+    return np.bincount(top).max() / len(top) >= thresh
+
+
+def make_batches(n, size, mode, person=None, seed=0):
+    idx = np.arange(n)
+    if mode == "shuffled":
+        idx = np.random.default_rng(seed).permutation(n)
+    elif mode == "mixed":                                        # interleave two people per batch
+        people = np.unique(person)
+        rng = np.random.default_rng(seed)
+        pools = {p: list(rng.permutation(np.where(person == p)[0])) for p in people}
+        out, order = [], list(people)
+        while any(pools.values()):
+            a, b = order[0], order[1 % len(order)]
+            take = [pools[a].pop() for _ in range(min(size // 2, len(pools[a])))]
+            take += [pools[b].pop() for _ in range(min(size - len(take), len(pools[b])))]
+            if take:
+                out.append(np.array(take))
+            order = [p for p in order[2:] + order[:2] if pools[p]] or order
+            if not any(pools[p] for p in order):
+                break
+        return out
+    return [idx[i:i + size] for i in range(0, n, size)]
+
+
+def routed(bank, arm, lam, batches, states, G):
+    import metrics
+    per_person = metrics.c3_logp(bank)                           # (n, P, C)
+    W = memberships(bank["fp_feat_test"], *states)
+    fp = bank["fp_logp"].copy()
+    for b in batches:
+        if lam == 0 or not gate(bank["fp_logp"][b]):
+            continue
+        prior = batch_prior(W[b], bank["fp_logp"][b], G, arm)
+        z = bank["fp_logp"][b] + lam * prior[None]
+        fp[b] = z - np.logaddexp.reduce(z, axis=1, keepdims=True)
+    return metrics.route(fp, per_person)
+```
+D2 scores the batch's expected transition counts against log G, i.e. the sequence log-likelihood
+under each person's grammar. This differs from neuralprint's cosine match of whole-session matrices
+because a 64-window batch is too short to estimate its own K × K matrix.
+
+- [ ] **Step 4: Tests OK; commit protocol, then code.**
+- [ ] **Step 5: First experiment.**
+  - D1, D2 and D3 on all three datasets (seeds 0–2) plus sim2.
+  - Run the full robustness suite and compare with row 2; λ fitted LODO on kit batching.
+  - Report whether D2/D3 beat D1, which tests whether the grammar adds anything beyond pooling.
+  - Commit results; continue as an autoresearch loop.
+
+---
+
+### Task 9: Final comparison and the one holdout confirmation (after all four loops conclude)
+
+- [ ] **Step 0: Option D.** D is ship-eligible only after the organisers confirm sealed-phase
+  `predict()` batch composition, and only if it passed every robustness condition. If D is a
+  candidate, also score "D + the A/B/C winner" on dev, pre-registered like the rest.
 - [ ] **Step 1: Pick on dev.** Collect each loop's dev verdict (candidate or not). If several are
   candidates, choose the one with the highest dev CI lower bound (ties → cheaper: A < B < C). If
   none, record that the current integration stands, and stop here; the holdout stays unused.
