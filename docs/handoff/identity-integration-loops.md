@@ -22,6 +22,16 @@ From `research/integration-harness/results/references.md` (17 dev people, seeds 
   experts are weak, and B's and C's shared networks.
 - On Dreyer sim2, row 2 is 0.936 (fingerprint 1.000; pooled 0.930).
 
+**For loop A: is the pooled EEGNet undertrained?** Checked, no. Its best validation epoch is late on
+Zhou 2016 (143–145 of 150) and on BNCI 2014-001 seed 0 (149), but not elsewhere (BNCI 2014 seeds
+1–2 at 130, BNCI 2015 at 85–132, sim2 at 89 of 100). A 300-epoch rerun, scored on the test session
+(scratch only, banks unchanged), gave:
+- Zhou, seeds 0–2: pooled +0.020 (all 3 people up), row 2 +0.004, row 3 −0.004;
+- BNCI 2014, seed 0: pooled −0.025, row 2 −0.009.
+
+The banks keep 150 epochs. If Zhou's pooled gain is real, it would shrink the current − pooled
+gap by about 0.0035 (3 of 17 people). A's fallback may be slightly pessimistic on Zhou only.
+
 **For loop C: the calibration posteriors are nearly perfect.** The banked leave-one-unit-out
 fingerprint posteriors on calibration (`fp_cv_logp_calib`) have top-1 of 1.000 (BNCI 2014-001),
 0.998 (BNCI 2015-001) and 0.999 (Zhou 2016). Across days, the test session's top-1 is 1.000, 0.952
