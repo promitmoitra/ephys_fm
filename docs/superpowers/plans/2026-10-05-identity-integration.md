@@ -7,9 +7,10 @@ autoresearch loops that each test one way of using the fingerprint's identity mo
 - **A:** a gated pooled fallback;
 - **B:** one shared network with per-person adapters;
 - **C:** identity as a network input.
-- **D** (revision 2026-10-09): a batch-level identity prior from neuralprint's Transition Grammar
-  Biometric Prior. It is evaluated like A, B and C, but **not shippable until the organisers confirm
-  sealed-phase batch composition**.
+- **D** (revision 2026-10-09; cut down 2026-10-11): a batch-level identity prior that pools the
+  batch's per-window fingerprint posteriors. Its transition-grammar arms were dropped after
+  neuralprint's runtime audit retracted the grammar's biometric results. It is evaluated like A, B
+  and C, but **not shippable until the organisers confirm sealed-phase batch composition**.
 
 **Architecture:**
 - **Phase 0** (`research/integration-harness/`, branch `exp/integration-harness`) trains the
@@ -106,7 +107,7 @@ BNCI 2014-001 (6 runs) and Zhou 2016 (4 session×run units) use their real runs.
 | `research/integration-gate/src/gate.py` (+ tests) | `exp/integration-gate` | Option A |
 | `research/integration-adapters/src/adapters.py` (+ tests) | `exp/integration-adapters` | Option B |
 | `research/integration-conditioned/src/conditioned.py` (+ tests) | `exp/integration-conditioned` | Option C |
-| `research/integration-sequence/src/grammar.py` (+ tests) | `exp/integration-sequence` | Option D (Transition Grammar prior) |
+| `research/integration-sequence/src/pooling.py` (+ tests) | `exp/integration-sequence` | Option D (pooled batch prior) |
 
 Tests for the harness run with:
 `.venv/bin/python -W ignore -m unittest discover -s research/integration-harness/tests -v`.
@@ -1369,153 +1370,113 @@ def train_conditioned(net, X, y, q, id_dropout=0.2, lr=1e-4, epochs=50, bs=32, s
 Run in its own session in `.claude/worktrees/t2-int-sequence` (branch `exp/integration-sequence`).
 Spec: Section 4b. **Not shippable** until the organisers confirm sealed-phase batch composition.
 
+*Revision 2026-10-11:* D is cut down to its pooled-posterior arm (the former D1). The
+transition-grammar arms (D2, D3), K = 16, γ = 0.05 and the neuralprint grammar code are gone. The
+reason is in spec Section 4b.
+
 **Files:**
 - Create: `research/integration-sequence/{research-state.yaml, research-log.md, findings.md}`
 - Create: `research/integration-sequence/experiments/00-protocol/protocol.md`
-- Create: `research/integration-sequence/src/grammar.py`, `research/integration-sequence/tests/test_grammar.py`
+- Create: `research/integration-sequence/src/pooling.py`, `research/integration-sequence/tests/test_pooling.py`
 
 **Interfaces:**
 - Consumes:
-  - bank keys `fp_feat_calib`, `person_calib`, `unit_calib`, `fp_feat_test`, `fp_logp`,
-    `person`, `y`;
-  - `metrics.c3_logp`, `metrics.route`, `metrics.person_scores`, `metrics.pooled_comparison`.
+  - bank keys `fp_logp`, `eeg_logp`, `riemann_logp`, `rel`, `person`, `y`;
+  - `metrics.c3_logp`, `metrics.route`, `metrics.seed_mean_scores`, `metrics.pooled_comparison`.
 - Produces:
-  - `fit_states(Z, K=16, seed=0) -> (mu, sd, centroids)`;
-  - `memberships(Z, mu, sd, centroids, gamma=0.05) -> (n, K)`;
-  - `transition_matrix(W, eps=1e-3) -> (K, K)`;
-  - `grammars(W_cal, person_cal, unit_cal, P) -> (P, K, K)`: per person, pooled over calibration
-    units, never across a unit boundary;
-  - `batch_prior(W_b, fp_logp_b, G, arm) -> (P,)` log-prior, arm ∈ {"D1", "D2", "D3"};
+  - `batch_prior(fp_logp_b) -> (P,)`: log-prior, the renormalised sum of the batch's per-window
+    fingerprint log-posteriors;
   - `gate(fp_logp_b, thresh=0.8) -> bool`;
-  - `routed(bank, arm, lam, batches) -> (n, C)` log-probabilities;
+  - `pooled_fp(bank, lam, batches) -> (n, P)`: routing log-posteriors after the gated batch prior;
+  - `routed(bank, lam, batches) -> (n, C)` log-probabilities;
   - `make_batches(n, size, mode, person=None, seed=0) -> list[np.ndarray]`, mode ∈ {"kit",
     "shuffled", "mixed"}.
 
 - [ ] **Step 1: Protocol 00 (commit first).**
-  - K = 16 and γ = 0.05 fixed a priori (neuralprint's non-overlapping settings); arms D1, D2, D3;
-    λ fitted leave-one-dataset-out on the kit batching.
+  - One arm: the pooled batch prior, gated; λ fitted leave-one-dataset-out on the kit batching.
   - The robustness suite: kit batches of 64; shuffled; two-person mixed; sizes 8 and 16.
   - The metric and candidate rule from the spec, plus the gate check: D must not score below row 2
     in any robustness condition.
-  - Attribution: the grammar code is adapted from neuralprint (commit `fad313c`).
+  - State the headroom up front: D's gain is bounded by row 3 − row 2 (+0.007 on dev).
 
-- [ ] **Step 2: Failing tests** `research/integration-sequence/tests/test_grammar.py`:
+- [ ] **Step 2: Failing tests** `research/integration-sequence/tests/test_pooling.py`:
 ```python
 import sys, unittest
 from pathlib import Path
 import numpy as np
 HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE / "src"))
-import grammar  # noqa: E402
+import pooling  # noqa: E402
 
 
-def chain(P, T, rng):
-    s = [0]
-    for _ in range(T - 1):
-        s.append(rng.choice(len(P), p=P[s[-1]]))
-    return np.eye(len(P))[s]
+def lsm(z):
+    return z - np.log(np.exp(z).sum(-1, keepdims=True))
 
 
-class TestGrammar(unittest.TestCase):
-    def test_transition_rows_sum_to_one(self):
-        W = np.random.default_rng(0).dirichlet(np.ones(4), 30)
-        np.testing.assert_allclose(grammar.transition_matrix(W).sum(1), 1, atol=1e-9)
+class TestPooling(unittest.TestCase):
+    def test_batch_prior_is_the_normalised_sum_of_window_posteriors(self):
+        lp = lsm(np.random.default_rng(0).standard_normal((16, 5)))
+        prior = pooling.batch_prior(lp)
+        np.testing.assert_allclose(np.exp(prior).sum(), 1, atol=1e-9)
+        np.testing.assert_allclose(prior - prior[0], lp.sum(0) - lp.sum(0)[0], atol=1e-9)
 
-    def test_batch_prior_prefers_the_generating_grammar(self):
-        rng = np.random.default_rng(1)
-        Pa = np.array([[.9, .1, 0, 0], [0, .9, .1, 0], [0, 0, .9, .1], [.1, 0, 0, .9]]) + 1e-3
-        Pb = Pa[:, ::-1].copy()
-        Pa /= Pa.sum(1, keepdims=True); Pb /= Pb.sum(1, keepdims=True)
-        G = np.stack([grammar.transition_matrix(chain(Pa, 400, rng)),
-                      grammar.transition_matrix(chain(Pb, 400, rng))])
-        W = chain(Pa, 64, rng)
-        lp = grammar.batch_prior(W, np.log(np.full((64, 2), .5)), G, arm="D2")
-        self.assertGreater(lp[0], lp[1])
+    def test_uniform_windows_give_a_uniform_prior(self):
+        prior = pooling.batch_prior(np.log(np.full((8, 4), .25)))
+        np.testing.assert_allclose(prior, np.log(np.full(4, .25)), atol=1e-12)
 
     def test_gate_rejects_mixed_batches(self):
         a = np.log(np.tile([.9, .1], (32, 1))); b = np.log(np.tile([.1, .9], (32, 1)))
-        self.assertTrue(grammar.gate(a))
-        self.assertFalse(grammar.gate(np.vstack([a, b])))
+        self.assertTrue(pooling.gate(a))
+        self.assertFalse(pooling.gate(np.vstack([a, b])))
 
     def test_lambda_zero_equals_per_window_routing(self):
         rng = np.random.default_rng(2)
-        n, P, C = 40, 3, 2
-        lsm = lambda z: z - np.log(np.exp(z).sum(-1, keepdims=True))  # noqa: E731
-        bank = {"fp_logp": lsm(rng.standard_normal((n, P))), "eeg_logp": lsm(rng.standard_normal((n, P, C))),
-                "riemann_logp": lsm(rng.standard_normal((n, P, C))), "rel": np.full(P, .7),
-                "fp_feat_test": rng.standard_normal((n, 5)), "y": rng.integers(0, C, n)}
-        st = grammar.fit_states(rng.standard_normal((60, 5)), K=4)
-        G = np.stack([np.full((4, 4), .25)] * P)
-        out = grammar.routed(bank, "D3", 0.0, grammar.make_batches(n, 8, "kit"), st, G)
-        sys.path.insert(0, str(HERE.parents[1] / "integration-harness" / "src"))
-        import metrics
-        np.testing.assert_allclose(out, metrics.route(bank["fp_logp"], metrics.c3_logp(bank)), atol=1e-9)
+        for C in (2, 3):
+            n, P = 40, 3
+            bank = {"fp_logp": lsm(rng.standard_normal((n, P))), "eeg_logp": lsm(rng.standard_normal((n, P, C))),
+                    "riemann_logp": lsm(rng.standard_normal((n, P, C))), "rel": np.full(P, .7),
+                    "y": rng.integers(0, C, n)}
+            out = pooling.routed(bank, 0.0, pooling.make_batches(n, 8, "kit"))
+            sys.path.insert(0, str(HERE.parents[1] / "integration-harness" / "src"))
+            import metrics
+            np.testing.assert_allclose(out, metrics.route(bank["fp_logp"], metrics.c3_logp(bank)), atol=1e-9)
+
+    def test_pooling_fixes_a_minority_of_wrong_windows(self):
+        fp = np.log(np.tile([.8, .2], (8, 1)))
+        fp[0] = np.log([.3, .7])                                  # one window routed to the wrong person
+        bank = {"fp_logp": fp, "eeg_logp": lsm(np.zeros((8, 2, 2))), "riemann_logp": lsm(np.zeros((8, 2, 2))),
+                "rel": np.full(2, .7)}
+        lp = pooling.pooled_fp(bank, 1.0, [np.arange(8)])
+        self.assertEqual(lp[0].argmax(), 0)
 
     def test_mixed_batches_alternate_people(self):
         person = np.repeat([0, 1], 20)
-        b = grammar.make_batches(40, 8, "mixed", person=person, seed=0)
+        b = pooling.make_batches(40, 8, "mixed", person=person, seed=0)
         self.assertTrue(all(len(set(person[i].tolist())) == 2 for i in b))
+        self.assertEqual(sorted(np.concatenate(b).tolist()), list(range(40)))
 
 
 if __name__ == "__main__":
     unittest.main()
 ```
 Run: `.venv/bin/python -W ignore -m unittest discover -s research/integration-sequence/tests -v`.
-Expected: `ModuleNotFoundError: No module named 'grammar'`.
+Expected: `ModuleNotFoundError: No module named 'pooling'`.
 
-- [ ] **Step 3: Implement `grammar.py`**
+- [ ] **Step 3: Implement `pooling.py`**
 ```python
-"""Option D: batch-level identity prior from a Transition Grammar Biometric Prior.
+"""Option D: batch-level identity prior from pooled per-window fingerprint posteriors.
 
-Adapted from neuralprint (`experiments/h-bnci2015-transition-fingerprint/code/run_experiment.py`,
-commit fad313c): soft k-means states on fingerprint tangent features, Dirichlet-smoothed Markov
-transition grammars. Here a grammar scores the short window sequence inside one predict() batch."""
+Within one predict() batch, sum the windows' fingerprint log-posteriors into a batch prior
+π(k | batch) and sharpen each window's routing posterior with it: p(k | x, batch) ∝ p(k | x)·π^λ.
+A homogeneity gate keeps λ = 0 unless one person wins ≥ 80% of the batch's windows."""
 import sys
 from pathlib import Path
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "integration-harness" / "src"))
 
 
-def fit_states(Z, K=16, seed=0):
-    from sklearn.cluster import KMeans
-    mu, sd = Z.mean(0), Z.std(0) + 1e-9
-    km = KMeans(n_clusters=K, random_state=seed, n_init=10).fit((Z - mu) / sd)
-    return mu, sd, km.cluster_centers_
-
-
-def memberships(Z, mu, sd, centroids, gamma=0.05):
-    d = np.linalg.norm(((Z - mu) / sd)[:, None] - centroids[None], axis=-1)
-    e = np.exp(-gamma * (d - d.min(1, keepdims=True)))          # stable softmax of −γ·d
-    return e / e.sum(1, keepdims=True)
-
-
-def transition_matrix(W, eps=1e-3):
-    if len(W) < 2:
-        return np.full((W.shape[1], W.shape[1]), 1.0 / W.shape[1])
-    M = W[:-1].T @ W[1:] + eps
-    return M / M.sum(1, keepdims=True)
-
-
-def grammars(W_cal, person_cal, unit_cal, P):
-    K = W_cal.shape[1]
-    G = np.zeros((P, K, K))
-    for k in range(P):
-        M = np.full((K, K), 1e-3)
-        for u in np.unique(unit_cal[person_cal == k]):
-            W = W_cal[(person_cal == k) & (unit_cal == u)]
-            if len(W) > 1:
-                M += W[:-1].T @ W[1:]                            # no transition across units
-        G[k] = M / M.sum(1, keepdims=True)
-    return G
-
-
-def batch_prior(W_b, fp_logp_b, G, arm):
-    lp = np.zeros(G.shape[0])
-    if arm in ("D2", "D3") and len(W_b) > 1:
-        T = W_b[:-1].T @ W_b[1:]                                 # expected transition counts
-        lp = lp + (T[None] * np.log(G)).sum((1, 2))
-    if arm in ("D1", "D3"):
-        lp = lp + fp_logp_b.sum(0)
+def batch_prior(fp_logp_b):
+    lp = fp_logp_b.sum(0)
     return lp - np.logaddexp.reduce(lp)
 
 
@@ -1546,28 +1507,27 @@ def make_batches(n, size, mode, person=None, seed=0):
     return [idx[i:i + size] for i in range(0, n, size)]
 
 
-def routed(bank, arm, lam, batches, states, G):
-    import metrics
-    per_person = metrics.c3_logp(bank)                           # (n, P, C)
-    W = memberships(bank["fp_feat_test"], *states)
+def pooled_fp(bank, lam, batches):
     fp = bank["fp_logp"].copy()
     for b in batches:
         if lam == 0 or not gate(bank["fp_logp"][b]):
             continue
-        prior = batch_prior(W[b], bank["fp_logp"][b], G, arm)
-        z = bank["fp_logp"][b] + lam * prior[None]
+        z = bank["fp_logp"][b] + lam * batch_prior(bank["fp_logp"][b])[None]
         fp[b] = z - np.logaddexp.reduce(z, axis=1, keepdims=True)
-    return metrics.route(fp, per_person)
+    return fp
+
+
+def routed(bank, lam, batches):
+    import metrics
+    return metrics.route(pooled_fp(bank, lam, batches), metrics.c3_logp(bank))
 ```
-D2 scores the batch's expected transition counts against log G, i.e. the sequence log-likelihood
-under each person's grammar. This differs from neuralprint's cosine match of whole-session matrices
-because a 64-window batch is too short to estimate its own K × K matrix.
+Dry-run 2026-10-11 from these two blocks: 6 tests OK. The λ = 0 test covers C = 2 and C = 3.
 
 - [ ] **Step 4: Tests OK; commit protocol, then code.**
 - [ ] **Step 5: First experiment.**
-  - D1, D2 and D3 on all three datasets (seeds 0–2) plus sim2.
-  - Run the full robustness suite and compare with row 2; λ fitted LODO on kit batching.
-  - Report whether D2/D3 beat D1, which tests whether the grammar adds anything beyond pooling.
+  - The pooled prior on all three datasets (seeds 0–2) plus sim2.
+  - Run the full robustness suite and compare with row 2 and row 3; λ fitted LODO on kit batching.
+  - Report what fraction of the row 3 − row 2 headroom pooling recovers, per dataset.
   - Commit results; continue as an autoresearch loop.
 
 ---

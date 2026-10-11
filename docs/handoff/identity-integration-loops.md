@@ -49,11 +49,17 @@ leave-one-dataset-out.
 | A, gated pooled fallback | `int-gate` | `exp/integration-gate` | `.claude/worktrees/t2-int-gate` | `research/integration-gate/` | `outputs/t2-int-gate/` | 6 |
 | B, per-person adapters | `int-adapters` | `exp/integration-adapters` | `.claude/worktrees/t2-int-adapters` | `research/integration-adapters/` | `outputs/t2-int-adapters/` | 7 |
 | C, identity as an input | `int-conditioned` | `exp/integration-conditioned` | `.claude/worktrees/t2-int-conditioned` | `research/integration-conditioned/` | `outputs/t2-int-conditioned/` | 8 |
-| D, batch-level identity prior | `int-sequence` | `exp/integration-sequence` | `.claude/worktrees/t2-int-sequence` | `research/integration-sequence/` | `outputs/t2-int-sequence/` | 8b |
+| D, pooled batch prior | `int-sequence` | `exp/integration-sequence` | `.claude/worktrees/t2-int-sequence` | `research/integration-sequence/` | `outputs/t2-int-sequence/` | 8b |
 
 **D is not shippable** until the competition organisers confirm that sealed-phase `predict()`
 batches hold consecutive windows from one recording, in order. It is still evaluated like A, B
-and C. K = 16 and γ = 0.05 are fixed a priori (spec Section 4b).
+and C.
+
+D pools the batch's per-window fingerprint posteriors into a gated prior (spec Section 4b,
+revision 2026-10-11). Its transition-grammar arms were dropped: neuralprint's runtime audit of
+2026-10-09 showed the grammar carried no temporal information (shuffling order changed nothing;
+occupancy matched transitions), and its 100% identification figures came from a projection that
+leaks identity. D's gain is capped by the +0.007 routing headroom above.
 
 ## Start commands
 

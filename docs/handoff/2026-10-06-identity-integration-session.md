@@ -33,16 +33,15 @@ loops, each with its own branch, worktree and workspace:
   by FiLM and trained with identity dropout. Branch `exp/integration-conditioned`, worktree
   `t2-int-conditioned`.
 
-- **D, sequence** (revision 2026-10-09): a batch-level identity prior from neuralprint's Transition
-  Grammar Biometric Prior (`/home/promit/Documents/neuralprint`). Branch `exp/integration-sequence`,
-  worktree `t2-int-sequence`. Spec Section 4b; plan Task 8b.
+- **D, sequence** (revision 2026-10-09; cut down 2026-10-11): a batch-level identity prior that
+  pools the batch's per-window fingerprint posteriors. Branch `exp/integration-sequence`, worktree
+  `t2-int-sequence`. Spec Section 4b; plan Task 8b.
   - **Not shippable until the competition organisers confirm** how sealed-phase `predict()`
     batches are composed (user decision). It relies on consecutive windows of one recording sharing
     a batch, which is undocumented.
-  - K = 16 and γ = 0.05 are fixed a priori: neuralprint chose them on data that includes our
-    holdout people.
-  - Arm D1 (pooled per-window posteriors, no grammar) tests whether the grammar adds anything
-    beyond pooling.
+  - The original transition-grammar arms (from neuralprint's Transition Grammar Biometric Prior)
+    were dropped on 2026-10-11 (user decision). neuralprint's runtime audit retracted that prior: its
+    grammar carried no temporal information, and its 100% results came from a leaky projection.
 - **Open action for the user:** ask the organisers whether sealed-phase `predict()` batches hold
   consecutive windows from one recording, in order.
 
