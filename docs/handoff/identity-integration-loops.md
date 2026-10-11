@@ -22,6 +22,16 @@ From `research/integration-harness/results/references.md` (17 dev people, seeds 
   experts are weak, and B's and C's shared networks.
 - On Dreyer sim2, row 2 is 0.936 (fingerprint 1.000; pooled 0.930).
 
+**For loop C: the calibration posteriors are nearly perfect.** The banked leave-one-unit-out
+fingerprint posteriors on calibration (`fp_cv_logp_calib`) have top-1 of 1.000 (BNCI 2014-001),
+0.998 (BNCI 2015-001) and 0.999 (Zhou 2016). Across days, the test session's top-1 is 1.000, 0.952
+and 0.747. The held-out unit always comes from the same session as the training units: Zhou's units
+are session × run, and BNCI 2015's two "runs" are halves of one session. So these posteriors carry
+almost none of the cross-day identity noise that C is meant to learn to tolerate. C's protocol
+must handle this before training on them, for example with leave-one-calibration-session-out
+posteriors for Zhou, or a temperature or noise level matched to cross-day top-1, fitted
+leave-one-dataset-out.
+
 ## The four loops
 
 | Option | Loop | Branch | Worktree | Workspace | Artifacts | Plan task |
@@ -94,20 +104,22 @@ Use Task 6 for A, 7 for B, 8 for C and 8b for D.
 - `adopt(cmp, sim2_delta)` applies the candidate rule: gain ≥ 0.005, CI lower bound > 0, and Dreyer
   sim2 not worse than row 2 by more than 0.01.
 
-Recipe, per dataset:
+- `seed_mean_scores(name, logp_fn, seeds=(0, 1, 2))` loads `bank_<name>_seed<s>.npz` for each seed,
+  scores `logp_fn(bank) -> (n, C)` per person and returns the mean over seeds. **Use it**, so the
+  person score is always the seed mean.
+
+Recipe (the primary metric for an option):
 
 ```python
-import numpy as np, data, metrics
-for s in (0, 1, 2):
-    b = dict(np.load(f"outputs/t2-int-harness/bank_{name}_seed{s}.npz"))
-    K = b["eeg_logp"].shape[1]
-    ref = metrics.person_scores(b["y"], b["person"], metrics.rows(b)["current"], K)
-    opt = metrics.person_scores(b["y"], b["person"], my_option_logp(b), K)
-# person score = mean over the 3 seeds, then
-cmp = metrics.pooled_comparison({name: (opt_mean, ref_mean) for name in data.DATASETS})
+import data, metrics
+cmp = metrics.pooled_comparison({
+    name: (metrics.seed_mean_scores(name, my_option_logp),
+           metrics.seed_mean_scores(name, lambda b: metrics.rows(b)["current"]))
+    for name in data.DATASETS})
+ok, why = metrics.adopt(cmp, sim2_delta)   # the dev candidate rule
 ```
 
-`research/integration-harness/src/run_refs.py` is the worked example.
+`research/integration-harness/src/run_refs.py` is the worked example for the reference rows.
 
 ## Finish
 

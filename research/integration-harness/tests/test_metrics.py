@@ -42,6 +42,20 @@ class TestMetrics(unittest.TestCase):
         self.assertFalse(metrics.adopt({"mean": .004, "ci": (.001, .01)}, sim2_delta=0)[0])
         self.assertFalse(metrics.adopt({"mean": .02, "ci": (.01, .03)}, sim2_delta=-.011)[0])
 
+    def test_seed_mean_scores_averages_seeds_per_person(self):
+        import tempfile
+        y = np.array([0, 1, 0, 1])
+        person = np.array([0, 0, 1, 1])
+        preds = {0: np.array([0, 1, 1, 0]),   # person 0 right, person 1 wrong
+                 1: np.array([0, 1, 0, 1])}   # both right
+        with tempfile.TemporaryDirectory() as d:
+            for s, p in preds.items():
+                np.savez(Path(d) / f"bank_toy_seed{s}.npz", y=y, person=person, eeg_logp=logp(4, 2, 2),
+                         pred=p)
+            sc = metrics.seed_mean_scores("toy", lambda b: np.log(np.eye(2)[b["pred"]] + 1e-9),
+                                          seeds=(0, 1), bank_dir=d)
+        np.testing.assert_allclose(sc, [1.0, 0.5])
+
 
 if __name__ == "__main__":
     unittest.main()

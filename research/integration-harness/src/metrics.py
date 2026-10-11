@@ -42,6 +42,15 @@ def person_scores(y, person, logp, K):
     return np.array([balanced_accuracy_score(y[person == k], pred[person == k]) for k in range(K)])
 
 
+def seed_mean_scores(name, logp_fn, seeds=(0, 1, 2), bank_dir=REPO / "outputs" / "t2-int-harness"):
+    """Person score = mean over seeds of per-person balanced accuracy; logp_fn(bank) -> (n, C)."""
+    per = []
+    for s in seeds:
+        b = dict(np.load(Path(bank_dir) / f"bank_{name}_seed{s}.npz"))
+        per.append(person_scores(b["y"], b["person"], logp_fn(b), b["eeg_logp"].shape[1]))
+    return np.mean(per, 0)
+
+
 def pooled_comparison(per_dataset, seed=0, n_boot=5000):
     d = np.concatenate([np.asarray(o) - np.asarray(r) for o, r in per_dataset.values()])
     rng = np.random.default_rng(seed)
