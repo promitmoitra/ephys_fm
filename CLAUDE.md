@@ -13,16 +13,18 @@ Paths are relative to your main checkout (your clone of the repository; the firs
 |---|---|---|
 | main checkout | `main`, always | Integration and packaging submissions only |
 | `.claude/worktrees/track2` | `track2/<topic>`, `exp/<topic>` | Track 2 (BCI decoding) competition work |
-| `.claude/worktrees/t2-int-harness` | `exp/integration-harness` | Track 2: shared cross-day harness for the identity-integration loops |
+| `.claude/worktrees/t2-fp-complex` | `exp/complex-fingerprint` | Track 2: 2×2 complex Hermitian × 5/6-band fingerprint on the cross-day harness |
 | `.claude/worktrees/data-atlas` | `research/data-atlas` | Data atlas research track (vision: `docs/atlas/vision.md` on `research/data-atlas`, not yet on `main`) |
 
 Each line of work writes run artifacts to its own subfolder of the shared `outputs/` and only reads
 the shared `data/` caches.
 
-Concluded: the Track 2 research loops A (`exp/fingerprint-model`) and B (`exp/expert-weights`) and
-their integration into `submission.py` (`track2/integrate-fp-c3`) merged in #7, #8 and #9. Their
-brief is `docs/handoff/track2-research-loops.md`; their local artifacts stay in
-`outputs/t2-fingerprint/`, `outputs/t2-expert-weights/` and `outputs/t2-integration/`.
+Concluded: the Track 2 research loops A (`exp/fingerprint-model`), B (`exp/expert-weights`), their
+integration into `submission.py` (`track2/integrate-fp-c3`), loop C (`exp/expert-portfolio`) and
+Phase 0 of identity integration (`exp/integration-harness`) merged in #7, #8, #9, #12 and #14. Their
+briefs are `docs/handoff/track2-research-loops.md` and `docs/handoff/identity-integration-loops.md`;
+their local artifacts stay in `outputs/t2-fingerprint/`, `outputs/t2-expert-weights/`,
+`outputs/t2-integration/`, `outputs/t2-portfolio/` and `outputs/t2-int-harness/`.
 
 `git worktree list` shows the current set on your machine.
 
