@@ -28,6 +28,7 @@ from submission import FBFingerprint  # noqa: E402
 
 ARMS = ("real_6b", "real_5b", "complex_6b", "complex_5b", "herm_real_6b", "herm_real_5b")
 CANDIDATE_ARMS = ("real_5b", "complex_6b", "complex_5b")
+BANK_DIR = REPO / "outputs" / "t2-int-harness"
 
 
 def id_person_metrics(person: np.ndarray, fp_logp: np.ndarray, K: int):
@@ -232,12 +233,18 @@ def _single_day_zhou_slices() -> dict:
     return slices
 
 
-def _routing_split_acc(name: str, fp_logp_ref: np.ndarray, fp_logp_arm: np.ndarray, seeds=(0, 1, 2)) -> dict:
+def _routing_split_acc(
+    name: str,
+    fp_logp_ref: np.ndarray,
+    fp_logp_arm: np.ndarray,
+    seeds=(0, 1, 2),
+    bank_dir: Path = BANK_DIR,
+) -> dict:
     """Task accuracy (plain window mean across seeds) on windows where real_6b ID was right vs wrong."""
     right_mask = None
     acc_right, acc_wrong = [], []
     for s in seeds:
-        b = np.load(metrics.OUT / f"bank_{name}_seed{s}.npz")
+        b = np.load(Path(bank_dir) / f"bank_{name}_seed{s}.npz")
         y, person = b["y"], b["person"]
         if right_mask is None:
             right_mask = fp_logp_ref.argmax(-1) == person
@@ -266,7 +273,7 @@ def run_all(threads: int = 2) -> dict:
         per_ds[name] = eval_dataset_arms(d)
 
         # Verify real_6b reproduces the banked fp_logp
-        b0 = np.load(metrics.OUT / f"bank_{name}_seed0.npz")
+        b0 = np.load(BANK_DIR / f"bank_{name}_seed0.npz")
         bank_diff = float(np.abs(np.exp(per_ds[name]["real_6b"]["fp_logp"]) - np.exp(b0["fp_logp"])).max())
         per_ds[name]["real_6b"]["bank_repro_max_prob_diff"] = bank_diff
 

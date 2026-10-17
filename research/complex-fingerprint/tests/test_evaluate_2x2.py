@@ -62,6 +62,25 @@ class TestEvaluate2x2(unittest.TestCase):
         ok, _ = evaluate_2x2.criterion_b_verdict(good_id_acc, good_id_nll, good_task, 0.0, 2e-4)
         self.assertFalse(ok)
 
+    def test_routing_split_acc_reads_bank_dir(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            self.assertTrue(evaluate_2x2.BANK_DIR.exists())
+            # Create a tiny synthetic bank_toy_seed0.npz
+            np.savez(
+                td_path / "bank_toy_seed0.npz",
+                y=np.array([0, 1, 0, 1]),
+                person=np.array([0, 0, 1, 1]),
+                eeg_logp=np.log(np.full((4, 2, 2), 0.5)),
+                riemann_logp=np.log(np.full((4, 2, 2), 0.5)),
+                rel=np.array([0.5, 0.5]),
+            )
+            fp_ref = np.log(np.array([[0.9, 0.1], [0.2, 0.8], [0.1, 0.9], [0.9, 0.1]]))
+            res = evaluate_2x2._routing_split_acc("toy", fp_ref, fp_ref, seeds=(0,), bank_dir=td_path)
+            self.assertEqual(res["n_right"], 2)
+            self.assertEqual(res["n_wrong"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
