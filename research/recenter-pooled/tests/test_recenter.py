@@ -229,7 +229,62 @@ class TestOnlineRecenter(unittest.TestCase):
             np.testing.assert_allclose(arms_1[name][:15], arms_2[name][:15], atol=1e-6)
 
 
+class TestMuBand(unittest.TestCase):
+    def test_estimate_mu_peak_recovers_true_oscillation_frequency(self):
+        import mu_band
+
+        rng = np.random.default_rng(42)
+        sfreq = 120.0
+        t = np.arange(480) / sfreq
+        for target_f in (8.2, 12.4):
+            X = rng.standard_normal((20, 4, 480)).astype(np.float32) * 0.3
+            X += (2.5 * np.sin(2 * np.pi * target_f * t))[None, None, :].astype(np.float32)
+            f_est = mu_band.estimate_mu_peak(X, sfreq=sfreq)
+            self.assertAlmostEqual(f_est, target_f, delta=0.4)
+
+    def test_mu_shifted_band_beats_fixed_8_30_when_mu_is_near_7hz(self):
+        import mu_band
+
+        rng = np.random.default_rng(19)
+        sfreq = 120.0
+        t = np.arange(480) / sfreq
+        X_cal, y_cal, p_cal = [], [], []
+        X_te, y_te, p_te = [], [], []
+        # Person 0 has a slow 7.2 Hz mu rhythm; task modulates channel c at 7.0 Hz
+        for sess in (0, 1):
+            for k, f_mu in enumerate((7.2, 10.5)):
+                for i in range(30):
+                    c = i % 2
+                    x = rng.standard_normal((4, 480)) * 1.5
+                    # Baseline mu peak on channel 3 so estimate_mu_peak detects 7.2 Hz for k=0
+                    x[3] += 3.0 * np.sin(2 * np.pi * f_mu * t)
+                    # Task modulation at 5.8 Hz for k=0 (inside [5.5, 27.2] Hz, attenuated by [8, 30] Hz)
+                    f_task = 5.8 if k == 0 else 10.0
+                    x[c] += 1.4 * np.sin(2 * np.pi * f_task * t)
+                    if sess == 0:
+                        X_cal.append(x.astype(np.float32))
+                        y_cal.append(c)
+                        p_cal.append(k)
+                    else:
+                        X_te.append(x.astype(np.float32))
+                        y_te.append(c)
+                        p_te.append(k)
+        X_cal, y_cal, p_cal = np.stack(X_cal), np.array(y_cal), np.array(p_cal)
+        X_te, y_te, p_te = np.stack(X_te), np.array(y_te), np.array(p_te)
+        fp_logits = np.full((len(p_te), 2), -6.0)
+        fp_logits[np.arange(len(p_te)), p_te] = 0.0
+        fp_logp = fp_logits - np.log(np.exp(fp_logits).sum(-1, keepdims=True))
+
+        res = mu_band.evaluate_mu_arms_on_split(X_cal, y_cal, p_cal, X_te, fp_logp, K=2, n_classes=2, sfreq=sfreq)
+        k0 = p_te == 0
+        acc_fixed = float((res["arms_logp"]["fixed_8_30_static"][k0, 0].argmax(-1) == y_te[k0]).mean())
+        acc_shift = float((res["arms_logp"]["mu_shift_wide_static"][k0, 0].argmax(-1) == y_te[k0]).mean())
+        self.assertLess(res["mu_peaks"][0], 7.7)
+        self.assertGreater(acc_shift, acc_fixed + 0.15)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 
