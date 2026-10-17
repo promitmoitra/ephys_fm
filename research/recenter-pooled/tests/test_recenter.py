@@ -140,6 +140,96 @@ class TestEvaluateRecenter(unittest.TestCase):
         self.assertIn("win_ci95", s)
 
 
+class TestOnlineRecenter(unittest.TestCase):
+    def _synthetic_cross_day_drift_dataset(self, K=3, n_classes=2, n_chans=4, per=40, seed=11):
+        rng = np.random.default_rng(seed)
+        t = np.arange(480) / 120.0
+        X_cal, y_cal, p_cal = [], [], []
+        X_te, y_te, p_te = [], [], []
+        # Day-2 multiplicative impedance drift per person that biases one task channel over the other
+        drifts = [
+            np.diag([0.25, 3.0, 1.0, 1.0]),
+            np.diag([1.0, 0.25, 3.0, 1.0]),
+            np.diag([3.0, 1.0, 0.25, 1.0]),
+        ]
+        for k in range(K):
+            for sess in (0, 1):
+                D = np.eye(n_chans) if sess == 0 else drifts[k]
+                for i in range(per):
+                    c = i % n_classes
+                    src = rng.standard_normal((n_chans, 480)) * 0.4
+                    # Person-specific task channel pair
+                    ch_task = (k + c) % n_chans
+                    src[ch_task] += 1.6 * np.sin(2 * np.pi * 12.0 * t)
+                    x = (D @ src).astype(np.float32)
+                    if sess == 0:
+                        X_cal.append(x)
+                        y_cal.append(c)
+                        p_cal.append(k)
+                    else:
+                        X_te.append(x)
+                        y_te.append(c)
+                        p_te.append(k)
+        p_te_arr = np.array(p_te)
+        # Near-accurate fingerprint log-posteriors
+        fp_logits = np.full((len(p_te_arr), K), -4.0)
+        fp_logits[np.arange(len(p_te_arr)), p_te_arr] = 0.0
+        fp_logp = fp_logits - np.log(np.exp(fp_logits).sum(-1, keepdims=True))
+        return (
+            np.stack(X_cal),
+            np.array(y_cal),
+            np.array(p_cal),
+            np.stack(X_te),
+            np.array(y_te),
+            p_te_arr,
+            fp_logp,
+        )
+
+    def test_online_adaptation_recovers_cross_day_session_drift_on_synthetic(self):
+        import online_recenter
+
+        X_cal, y_cal, p_cal, X_te, y_te, p_te, fp_logp = self._synthetic_cross_day_drift_dataset()
+        experts = online_recenter.fit_per_person_experts(X_cal, y_cal, p_cal, K=3, n_classes=2, sfreq=120.0)
+        arms = online_recenter.compute_all_arms(experts, X_te, fp_logp, p_te)
+
+        # Under severe Day-2 channel scaling drift, static calibration reference drops sharply,
+        # while both causal shuffled EMA and SPD session adaptation recover high accuracy.
+        acc_static = float((arms["static_cal_ref"][np.arange(len(y_te)), p_te].argmax(-1) == y_te).mean())
+        acc_ema_shuf = float((arms["ema_tangent_shuffled"][np.arange(len(y_te)), p_te].argmax(-1) == y_te).mean())
+        acc_spd = float((arms["session_fp_spd"][np.arange(len(y_te)), p_te].argmax(-1) == y_te).mean())
+        self.assertGreater(acc_ema_shuf, acc_static + 0.15)
+        self.assertGreater(acc_spd, acc_static + 0.15)
+
+    def test_session_adaptation_is_permutation_invariant(self):
+        import online_recenter
+
+        X_cal, y_cal, p_cal, X_te, _, p_te, fp_logp = self._synthetic_cross_day_drift_dataset(per=16)
+        experts = online_recenter.fit_per_person_experts(X_cal, y_cal, p_cal, K=3, n_classes=2, sfreq=120.0)
+        arms_orig = online_recenter.compute_all_arms(experts, X_te, fp_logp, p_te)
+
+        perm = np.random.default_rng(99).permutation(len(X_te))
+        inv_perm = np.argsort(perm)
+        arms_perm = online_recenter.compute_all_arms(experts, X_te[perm], fp_logp[perm], p_te[perm])
+
+        for name in ("session_fp_tangent", "session_fp_spd", "oracle_session_spd"):
+            np.testing.assert_allclose(arms_orig[name], arms_perm[name][inv_perm], atol=1e-5)
+
+    def test_causal_ema_has_zero_future_leakage(self):
+        import online_recenter
+
+        X_cal, y_cal, p_cal, X_te, _, p_te, fp_logp = self._synthetic_cross_day_drift_dataset(per=12)
+        experts = online_recenter.fit_per_person_experts(X_cal, y_cal, p_cal, K=3, n_classes=2, sfreq=120.0)
+        arms_1 = online_recenter.compute_all_arms(experts, X_te, fp_logp, p_te)
+
+        X_te_mod = X_te.copy()
+        X_te_mod[15:] *= 50.0  # Corrupt future windows >= 15
+        arms_2 = online_recenter.compute_all_arms(experts, X_te_mod, fp_logp, p_te)
+
+        for name in ("ema_tangent_ordered", "ema_spd_ordered"):
+            np.testing.assert_allclose(arms_1[name][:15], arms_2[name][:15], atol=1e-6)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
