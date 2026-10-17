@@ -7,6 +7,10 @@ autoresearch loops that each test one way of using the fingerprint's identity mo
 - **A:** a gated pooled fallback;
 - **B:** one shared network with per-person adapters;
 - **C:** identity as a network input.
+- **D** (revision 2026-10-09; cut down 2026-10-11): a batch-level identity prior that pools the
+  batch's per-window fingerprint posteriors. Its transition-grammar arms were dropped after
+  neuralprint's runtime audit retracted the grammar's biometric results. It is evaluated like A, B
+  and C, but **not shippable until the organisers confirm sealed-phase batch composition**.
 
 **Architecture:**
 - **Phase 0** (`research/integration-harness/`, branch `exp/integration-harness`) trains the
@@ -103,6 +107,7 @@ BNCI 2014-001 (6 runs) and Zhou 2016 (4 session×run units) use their real runs.
 | `research/integration-gate/src/gate.py` (+ tests) | `exp/integration-gate` | Option A |
 | `research/integration-adapters/src/adapters.py` (+ tests) | `exp/integration-adapters` | Option B |
 | `research/integration-conditioned/src/conditioned.py` (+ tests) | `exp/integration-conditioned` | Option C |
+| `research/integration-sequence/src/pooling.py` (+ tests) | `exp/integration-sequence` | Option D (pooled batch prior) |
 
 Tests for the harness run with:
 `.venv/bin/python -W ignore -m unittest discover -s research/integration-harness/tests -v`.
@@ -401,6 +406,8 @@ class TestPipeline(unittest.TestCase):
         for k in ("fp_logp", "eeg_logp", "riemann_logp", "pooled_logp", "fp_cv_logp_calib"):
             np.testing.assert_allclose(np.exp(b[k]).sum(-1), 1.0, atol=1e-4, err_msg=k)
         self.assertGreater((b["fp_logp"].argmax(1) == b["person"]).mean(), 0.9)   # identity is easy
+        self.assertEqual(b["fp_feat_test"].shape[0], n)                           # loop D inputs
+        self.assertEqual(b["fp_feat_calib"].shape[0], int(d["calib"].sum()))
 
     def _tmp(self):
         import tempfile
@@ -484,6 +491,8 @@ def run(d, seed, threads, epochs, ft_epochs=50, out_dir=OUT):
     cents = np.stack([z_cal[person[cal] == k].mean(0) for k in range(K)])
     dist = lambda z: np.sqrt(((z[:, None] - cents[None]) ** 2).sum(-1)).min(1) / np.sqrt(z.shape[1])  # noqa: E731
     bank["fp_dist"], bank["fp_dist_ref"] = dist(z_te), np.median(dist(z_cal))
+    bank["fp_feat_test"], bank["fp_feat_calib"] = f_te.astype(np.float32), f_cal.astype(np.float32)
+    torch.save(st, out_dir / f"fp_{d['name']}_seed{seed}.pt")             # loop D
 
     log("fingerprint, leave-one-unit-out posteriors on calibration")
     cal_idx = np.where(cal)[0]
@@ -1356,8 +1365,178 @@ def train_conditioned(net, X, y, q, id_dropout=0.2, lr=1e-4, epochs=50, bs=32, s
 
 ---
 
-### Task 9: Final comparison and the one holdout confirmation (after all three loops conclude)
+### Task 8b: Loop D bootstrap: batch-level identity prior (`int-sequence`)
 
+Run in its own session in `.claude/worktrees/t2-int-sequence` (branch `exp/integration-sequence`).
+Spec: Section 4b. **Not shippable** until the organisers confirm sealed-phase batch composition.
+
+*Revision 2026-10-11:* D is cut down to its pooled-posterior arm (the former D1). The
+transition-grammar arms (D2, D3), K = 16, γ = 0.05 and the neuralprint grammar code are gone. The
+reason is in spec Section 4b.
+
+**Files:**
+- Create: `research/integration-sequence/{research-state.yaml, research-log.md, findings.md}`
+- Create: `research/integration-sequence/experiments/00-protocol/protocol.md`
+- Create: `research/integration-sequence/src/pooling.py`, `research/integration-sequence/tests/test_pooling.py`
+
+**Interfaces:**
+- Consumes:
+  - bank keys `fp_logp`, `eeg_logp`, `riemann_logp`, `rel`, `person`, `y`;
+  - `metrics.c3_logp`, `metrics.route`, `metrics.seed_mean_scores`, `metrics.pooled_comparison`.
+- Produces:
+  - `batch_prior(fp_logp_b) -> (P,)`: log-prior, the renormalised sum of the batch's per-window
+    fingerprint log-posteriors;
+  - `gate(fp_logp_b, thresh=0.8) -> bool`;
+  - `pooled_fp(bank, lam, batches) -> (n, P)`: routing log-posteriors after the gated batch prior;
+  - `routed(bank, lam, batches) -> (n, C)` log-probabilities;
+  - `make_batches(n, size, mode, person=None, seed=0) -> list[np.ndarray]`, mode ∈ {"kit",
+    "shuffled", "mixed"}.
+
+- [ ] **Step 1: Protocol 00 (commit first).**
+  - One arm: the pooled batch prior, gated; λ fitted leave-one-dataset-out on the kit batching.
+  - The robustness suite: kit batches of 64; shuffled; two-person mixed; sizes 8 and 16.
+  - The metric and candidate rule from the spec, plus the gate check: D must not score below row 2
+    in any robustness condition.
+  - State the headroom up front: D's gain is bounded by row 3 − row 2 (+0.007 on dev).
+
+- [ ] **Step 2: Failing tests** `research/integration-sequence/tests/test_pooling.py`:
+```python
+import sys, unittest
+from pathlib import Path
+import numpy as np
+HERE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(HERE / "src"))
+import pooling  # noqa: E402
+
+
+def lsm(z):
+    return z - np.log(np.exp(z).sum(-1, keepdims=True))
+
+
+class TestPooling(unittest.TestCase):
+    def test_batch_prior_is_the_normalised_sum_of_window_posteriors(self):
+        lp = lsm(np.random.default_rng(0).standard_normal((16, 5)))
+        prior = pooling.batch_prior(lp)
+        np.testing.assert_allclose(np.exp(prior).sum(), 1, atol=1e-9)
+        np.testing.assert_allclose(prior - prior[0], lp.sum(0) - lp.sum(0)[0], atol=1e-9)
+
+    def test_uniform_windows_give_a_uniform_prior(self):
+        prior = pooling.batch_prior(np.log(np.full((8, 4), .25)))
+        np.testing.assert_allclose(prior, np.log(np.full(4, .25)), atol=1e-12)
+
+    def test_gate_rejects_mixed_batches(self):
+        a = np.log(np.tile([.9, .1], (32, 1))); b = np.log(np.tile([.1, .9], (32, 1)))
+        self.assertTrue(pooling.gate(a))
+        self.assertFalse(pooling.gate(np.vstack([a, b])))
+
+    def test_lambda_zero_equals_per_window_routing(self):
+        rng = np.random.default_rng(2)
+        for C in (2, 3):
+            n, P = 40, 3
+            bank = {"fp_logp": lsm(rng.standard_normal((n, P))), "eeg_logp": lsm(rng.standard_normal((n, P, C))),
+                    "riemann_logp": lsm(rng.standard_normal((n, P, C))), "rel": np.full(P, .7),
+                    "y": rng.integers(0, C, n)}
+            out = pooling.routed(bank, 0.0, pooling.make_batches(n, 8, "kit"))
+            sys.path.insert(0, str(HERE.parents[1] / "integration-harness" / "src"))
+            import metrics
+            np.testing.assert_allclose(out, metrics.route(bank["fp_logp"], metrics.c3_logp(bank)), atol=1e-9)
+
+    def test_pooling_fixes_a_minority_of_wrong_windows(self):
+        fp = np.log(np.tile([.8, .2], (8, 1)))
+        fp[0] = np.log([.3, .7])                                  # one window routed to the wrong person
+        bank = {"fp_logp": fp, "eeg_logp": lsm(np.zeros((8, 2, 2))), "riemann_logp": lsm(np.zeros((8, 2, 2))),
+                "rel": np.full(2, .7)}
+        lp = pooling.pooled_fp(bank, 1.0, [np.arange(8)])
+        self.assertEqual(lp[0].argmax(), 0)
+
+    def test_mixed_batches_alternate_people(self):
+        person = np.repeat([0, 1], 20)
+        b = pooling.make_batches(40, 8, "mixed", person=person, seed=0)
+        self.assertTrue(all(len(set(person[i].tolist())) == 2 for i in b))
+        self.assertEqual(sorted(np.concatenate(b).tolist()), list(range(40)))
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+Run: `.venv/bin/python -W ignore -m unittest discover -s research/integration-sequence/tests -v`.
+Expected: `ModuleNotFoundError: No module named 'pooling'`.
+
+- [ ] **Step 3: Implement `pooling.py`**
+```python
+"""Option D: batch-level identity prior from pooled per-window fingerprint posteriors.
+
+Within one predict() batch, sum the windows' fingerprint log-posteriors into a batch prior
+π(k | batch) and sharpen each window's routing posterior with it: p(k | x, batch) ∝ p(k | x)·π^λ.
+A homogeneity gate keeps λ = 0 unless one person wins ≥ 80% of the batch's windows."""
+import sys
+from pathlib import Path
+import numpy as np
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "integration-harness" / "src"))
+
+
+def batch_prior(fp_logp_b):
+    lp = fp_logp_b.sum(0)
+    return lp - np.logaddexp.reduce(lp)
+
+
+def gate(fp_logp_b, thresh=0.8):
+    top = fp_logp_b.argmax(1)
+    return np.bincount(top).max() / len(top) >= thresh
+
+
+def make_batches(n, size, mode, person=None, seed=0):
+    idx = np.arange(n)
+    if mode == "shuffled":
+        idx = np.random.default_rng(seed).permutation(n)
+    elif mode == "mixed":                                        # interleave two people per batch
+        people = np.unique(person)
+        rng = np.random.default_rng(seed)
+        pools = {p: list(rng.permutation(np.where(person == p)[0])) for p in people}
+        out, order = [], list(people)
+        while any(pools.values()):
+            a, b = order[0], order[1 % len(order)]
+            take = [pools[a].pop() for _ in range(min(size // 2, len(pools[a])))]
+            take += [pools[b].pop() for _ in range(min(size - len(take), len(pools[b])))]
+            if take:
+                out.append(np.array(take))
+            order = [p for p in order[2:] + order[:2] if pools[p]] or order
+            if not any(pools[p] for p in order):
+                break
+        return out
+    return [idx[i:i + size] for i in range(0, n, size)]
+
+
+def pooled_fp(bank, lam, batches):
+    fp = bank["fp_logp"].copy()
+    for b in batches:
+        if lam == 0 or not gate(bank["fp_logp"][b]):
+            continue
+        z = bank["fp_logp"][b] + lam * batch_prior(bank["fp_logp"][b])[None]
+        fp[b] = z - np.logaddexp.reduce(z, axis=1, keepdims=True)
+    return fp
+
+
+def routed(bank, lam, batches):
+    import metrics
+    return metrics.route(pooled_fp(bank, lam, batches), metrics.c3_logp(bank))
+```
+Dry-run 2026-10-11 from these two blocks: 6 tests OK. The λ = 0 test covers C = 2 and C = 3.
+
+- [ ] **Step 4: Tests OK; commit protocol, then code.**
+- [ ] **Step 5: First experiment.**
+  - The pooled prior on all three datasets (seeds 0–2) plus sim2.
+  - Run the full robustness suite and compare with row 2 and row 3; λ fitted LODO on kit batching.
+  - Report what fraction of the row 3 − row 2 headroom pooling recovers, per dataset.
+  - Commit results; continue as an autoresearch loop.
+
+---
+
+### Task 9: Final comparison and the one holdout confirmation (after all four loops conclude)
+
+- [ ] **Step 0: Option D.** D is ship-eligible only after the organisers confirm sealed-phase
+  `predict()` batch composition, and only if it passed every robustness condition. If D is a
+  candidate, also score "D + the A/B/C winner" on dev, pre-registered like the rest.
 - [ ] **Step 1: Pick on dev.** Collect each loop's dev verdict (candidate or not). If several are
   candidates, choose the one with the highest dev CI lower bound (ties → cheaper: A < B < C). If
   none, record that the current integration stands, and stop here; the holdout stays unused.

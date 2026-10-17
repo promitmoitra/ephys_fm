@@ -48,6 +48,12 @@ end with the fingerprint's real errors (no oracle identity).
 
 At most one option ships.
 
+**Revision 2026-10-09: option D added** (Section 4b): a batch-level identity prior. It is evaluated
+like A, B and C, but **it is not shippable until the competition organisers confirm** how
+sealed-phase `predict()` batches are composed (user decision).
+**Revision 2026-10-11:** D was cut down to its pooled-posterior arm. Its transition-grammar arms
+were dropped after neuralprint's runtime audit retracted the grammar's biometric results.
+
 ## Section 1: the shared evaluation (binding for A, B and C)
 
 ### Datasets (cached, kit format: 120 Hz, 4-s windows)
@@ -172,7 +178,47 @@ protocols before their results.
 - **Main risk:** overfitting with 4–12 people per dataset; embeddings are per dataset. Report the
   train–test gap.
 
-## Section 5: running A, B and C in parallel
+## Section 4b: Option D, batch-level identity prior (pooled per-window posteriors)
+
+- **Loop:** `int-sequence` · branch `exp/integration-sequence` · worktree
+  `.claude/worktrees/t2-int-sequence` · workspace `research/integration-sequence/` · artifacts
+  `outputs/t2-int-sequence/`.
+- **Revision 2026-10-11: cut down to its pooled-posterior arm (former D1)** (user decision).
+  - The grammar arms (former D2, D3) are dropped. They were motivated by neuralprint's
+    "Transition Grammar Biometric Prior", and neuralprint's runtime audit of 2026-10-09
+    (`openwiki/experiments/runtime-verification-2026-10-09.md`) retracted it:
+    - shuffling window order leaves identification unchanged;
+    - time-free state occupancy matches or beats the transition matrices;
+    - at K ≥ N the k-means "states" are the people themselves;
+    - the 100% / 0% EER figures came from a per-subject projection that leaks identity.
+  - Pooling per-window posteriors over a batch is the occupancy-like evidence that survived
+    that audit, so it is what D keeps. K, γ and any neuralprint code are no longer used.
+- **Integration in Track 2:** `predict(X)` gets a batch of windows (the kit: 64, dataset order, no
+  shuffling; **undocumented**, and the kit says to rely only on `meta` and the batch).
+  - D turns the batch into a prior π(k | batch) ∝ Π_windows p(k | x), the sum of the batch's
+    per-window fingerprint log-posteriors, renormalised.
+  - The routing posterior is then p(k | x, batch) ∝ p(k | x) · π(k | batch)^λ.
+  - **Homogeneity gate:** λ = 0 (pure per-window routing) unless the batch's per-window fingerprint
+    argmax agrees on one person for ≥ 80% of windows. Mixed-person batches, recording boundaries and
+    shuffled order therefore fall back to the current design.
+  - λ is fitted leave-one-dataset-out.
+- **Required robustness tests**, scored like the primary metric:
+  - the kit's batching (64, dataset order);
+  - shuffled windows;
+  - batches mixing two people;
+  - batch sizes 8 and 16.
+
+  **D must never score below row 2 on any of them** (gate check).
+- **Headroom:** D only changes *who*, so its gain is bounded by row 3 − row 2. On the 17 dev
+  people that is +0.007 [0.000, +0.021] (`research/integration-harness/results/references.md`),
+  barely above the candidate rule's +0.005; BNCI 2014-001 has none (fingerprint 1.000).
+- **Relation to A/B/C:** D improves *who*; A/B/C improve *how identity is used*. The final
+  comparison also scores D combined with the A/B/C winner.
+- **Hypothesis:** across days, where the per-window fingerprint drops (0.747 on Zhou 2016, 0.953
+  on BNCI 2015-001), pooling evidence over a batch of one person's windows recovers most of the
+  oracle routing.
+
+## Section 5: running A, B, C and D in parallel
 
 1. **Precondition:** loop C (`exp/expert-portfolio`) is concluded and merged into `main`. It
    holds the sim2 option in `train_mixture.py`, `track2/models.py`, the N-stream combiner and
@@ -192,7 +238,7 @@ protocols before their results.
      artifacts under `outputs/<worktree name>/`;
    - its own 20-minute heartbeat in its own Claude Code session, protocols committed before
      results, and ≤ 2 CPU threads.
-4. **Order:** A starts first. B and C start in parallel once the harness is on `main`.
+4. **Order:** A starts first. B, C and D start in parallel once the harness is on `main`.
 5. **Finish:**
    - Each loop concludes with findings, a report in `research/<loop>/to_human/` and a PR.
    - A final comparison picks at most one candidate on dev (Goal, stage 1). It confirms that one

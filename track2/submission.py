@@ -84,12 +84,15 @@ class FBFingerprint(nn.Module):
         self.register_buffer("cref_isqrt", torch.zeros(n_bands, n_chans, n_chans))
         self.linear = nn.Linear(n_feat, n_subjects)
 
+    def features(self, X):
+        """Concatenated per-band tangent features (B, F), before the linear layer."""
+        X = X.to(self.filters.dtype)
+        return torch.cat([tangent(oas(X @ M), W)
+                          for M, W in zip(self.filters, self.cref_isqrt)], -1)
+
     def forward(self, X):
         """Logits (B, K)."""
-        X = X.to(self.filters.dtype)
-        f = torch.cat([tangent(oas(X @ M), W)
-                       for M, W in zip(self.filters, self.cref_isqrt)], -1)
-        return self.linear(f.to(self.linear.weight.dtype))
+        return self.linear(self.features(X).to(self.linear.weight.dtype))
 
 
 class RiemannExperts(nn.Module):
