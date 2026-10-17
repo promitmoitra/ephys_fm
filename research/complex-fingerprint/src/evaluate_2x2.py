@@ -418,10 +418,107 @@ def run_all(threads: int = 2) -> dict:
     return results
 
 
+def format_markdown_report(res: dict) -> str:
+    """Dynamically format markdown report from 2x2_results.json (Rule FM-11)."""
+    lines = [
+        "# Results: Protocol 00 — 2 × 2 Complex Hermitian × 5/6-Band Fingerprint",
+        "",
+        f"- **Protocol:** [`{res['protocol']}`](../experiments/00-protocol/protocol.md)",
+        f"- **Selected fingerprint (Criterion B):** **`{res['selected_fingerprint']}`**",
+        f"- **Qualifying candidates (Criterion B):** `{res['qualifying_candidates_criterion_b']}`",
+        "",
+        "## 1. Pooled 17 Cross-Day Dev People (`bnci2014` 6 + `bnci2015` 8 + `zhou2016` 3)",
+        "",
+        "| Arm | ID Bal Acc | Δ ID Acc vs `real_6b` [95% CI] (B/W/E) | ID NLL | −Δ NLL Gain vs `real_6b` [95% CI] (B/W) | Task Bal Acc | Δ Task vs `real_6b` [95% CI] (B/W/E) | `sim2` Δ Task | Max Export |Δp| | Criterion A | Criterion B |",
+        "|---|---:|---|---:|---|---:|---|---:|---:|:---:|:---:|",
+    ]
+    for arm in ARMS:
+        c = res["pooled_17_dev_comparisons"][arm]
+        ia = c["id_acc_vs_real_6b"]
+        inll = c["id_nll_gain_vs_real_6b"]
+        ta = c["task_acc_vs_real_6b"]
+        ca = "PASS" if c["criterion_a_track2_adopt"]["passed"] else "FAIL"
+        cb = "**PASS**" if c["criterion_b_fp_replace"]["passed"] else "FAIL"
+        lines.append(
+            f"| `{arm}` | {c['pooled_17_id_acc']:.4f} | "
+            f"{ia['mean']:+.4f} [{ia['ci'][0]:+.4f}, {ia['ci'][1]:+.4f}] ({ia['better']}/{ia['worse']}/{ia['equal']}) | "
+            f"{c['pooled_17_id_nll']:.4f} | "
+            f"{inll['mean']:+.4f} [{inll['ci'][0]:+.4f}, {inll['ci'][1]:+.4f}] ({inll['better']}/{inll['worse']}) | "
+            f"{c['pooled_17_task_acc']:.4f} | "
+            f"{ta['mean']:+.4f} [{ta['ci'][0]:+.4f}, {ta['ci'][1]:+.4f}] ({ta['better']}/{ta['worse']}/{ta['equal']}) | "
+            f"{c['sim2_task_delta']:+.4f} | {c['max_export_prob_diff']:.2e} | {ca} | {cb} |"
+        )
+
+    lines.extend([
+        "",
+        "## 2. Per-Dataset Breakdown",
+        "",
+        "| Dataset | Arm | ID Bal Acc | ID Mean NLL | Task Bal Acc (Oracle / Pooled) | Ref-Right Task Acc | Ref-Wrong Task Acc | State Size (MB) |",
+        "|---|---|---:|---:|---|---:|---:|---:|",
+    ])
+    for ds_name, ds in res["datasets"].items():
+        ora = ds["oracle_task_bal_acc"]
+        pld = ds["pooled_task_bal_acc"]
+        for arm in ARMS:
+            a = ds["arms"][arm]
+            rs = a["routing_split"]
+            r_right = f"{rs['acc_on_ref_right']:.4f}" if rs["acc_on_ref_right"] is not None else "—"
+            r_wrong = f"{rs['acc_on_ref_wrong']:.4f}" if rs["acc_on_ref_wrong"] is not None else "—"
+            mb = a["state_bytes"] / 1e6 if a["state_bytes"] else 0.0
+            lines.append(
+                f"| `{ds_name}` | `{arm}` | {a['id_bal_acc']:.4f} | {a['id_mean_nll']:.4f} | "
+                f"{a['task_bal_acc']:.4f} ({ora:.4f} / {pld:.4f}) | {r_right} (n={rs['n_right']}) | "
+                f"{r_wrong} (n={rs['n_wrong']}) | {mb:.2f} |"
+            )
+
+    pl6 = res["phase_lag_vs_herm_real"]["6b"]
+    pl5 = res["phase_lag_vs_herm_real"]["5b"]
+    lines.extend([
+        "",
+        "## 3. Estimator vs Phase-Lag Decomposition (`complex` vs `herm_real`)",
+        "",
+        f"- **6-band (`complex_6b − herm_real_6b`):** {pl6['mean']:+.4f} ID acc "
+        f"[{pl6['ci'][0]:+.4f}, {pl6['ci'][1]:+.4f}], {pl6['better']} better / {pl6['worse']} worse / {pl6['equal']} equal.",
+        f"- **5-band (`complex_5b − herm_real_5b`):** {pl5['mean']:+.4f} ID acc "
+        f"[{pl5['ci'][0]:+.4f}, {pl5['ci'][1]:+.4f}], {pl5['better']} better / {pl5['worse']} worse / {pl5['equal']} equal.",
+        "",
+        "## 4. Secondary Single-Day Calibration Diagnostic on `zhou2016` (3 dev people)",
+        "",
+        "| Slice | `real_6b` Acc / NLL | `real_5b` Acc / NLL | `complex_6b` Acc / NLL | `complex_5b` Acc / NLL | `herm_real_6b` Acc / NLL | `herm_real_5b` Acc / NLL |",
+        "|---|---|---|---|---|---|---|",
+    ])
+    for sl_name, sl in res["zhou2016_single_day_slices"].items():
+        cells = [f"{sl[a]['id_bal_acc']:.4f} / {sl[a]['id_mean_nll']:.4f}" for a in ARMS]
+        lines.append(f"| `{sl_name}` | " + " | ".join(cells) + " |")
+
+    p500 = res["projected_500hz_size"]
+    lines.extend([
+        "",
+        "## 5. Projected Buffer Sizes at Sealed-Phase 500 Hz (`T=2000, C=43, K=10`)",
+        "",
+        f"- `real_6b` (`float32`): **{p500['real_6b_float32_MB']:.1f} MB**",
+        f"- `complex_6b` (`complex64`): **{p500['complex_6b_complex64_MB']:.1f} MB**",
+        f"- `complex_5b` (`complex64`): **{p500['complex_5b_complex64_MB']:.1f} MB**",
+        "",
+    ])
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
-    res = run_all(threads=2)
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--report-only", action="store_true")
+    ap.add_argument("--threads", type=int, default=2)
+    args = ap.parse_args()
     res_dir = HERE.parent / "results"
     res_dir.mkdir(parents=True, exist_ok=True)
     out_json = res_dir / "2x2_results.json"
-    out_json.write_text(json.dumps(res, indent=2))
-    print(f"Saved {out_json}")
+    out_md = res_dir / "2x2_results.md"
+    if args.report_only:
+        res = json.loads(out_json.read_text())
+    else:
+        res = run_all(threads=args.threads)
+        out_json.write_text(json.dumps(res, indent=2))
+        print(f"Saved {out_json}")
+    out_md.write_text(format_markdown_report(res))
+    print(f"Saved {out_md}")

@@ -81,6 +81,17 @@ class TestEvaluate2x2(unittest.TestCase):
             self.assertEqual(res["n_right"], 2)
             self.assertEqual(res["n_wrong"], 2)
 
+    def test_format_markdown_report_reads_json_dynamically(self):
+        res_json = HERE / "results" / "2x2_results.json"
+        import json
+        data_dict = json.loads(res_json.read_text())
+        md = evaluate_2x2.format_markdown_report(data_dict)
+        for arm in evaluate_2x2.ARMS:
+            self.assertIn(arm, md)
+        self.assertIn("complex_6b", md)
+        self.assertIn("Criterion A", md)
+        self.assertIn("Criterion B", md)
+
 
 if __name__ == "__main__":
     unittest.main()
