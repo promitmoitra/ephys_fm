@@ -37,10 +37,12 @@ PROTOCOL02_ARMS = (
     "fixed_8_30_static",
     "mu_shift_wide_static",
     "mu_lower_edge_static",
+    "fixed_2band_static",
     "mu_beta_2band_static",
     "fixed_8_30_ema_shuf",
     "mu_shift_wide_ema_shuf",
     "mu_lower_edge_ema_shuf",
+    "fixed_2band_ema_shuf",
     "mu_beta_2band_ema_shuf",
     "mu_shift_wide_sess_spd",
 )
@@ -181,10 +183,8 @@ def _fit_dual_band_per_person(
 
         F_tr = np.hstack(tr_feats)
         F_te = np.hstack(te_feats)
-        sc = StandardScaler().fit(F_tr)
-        lr = LogisticRegression(C=riemann_parts.RIEMANN_C, max_iter=5000).fit(sc.transform(F_tr), y_cal[m])
-        w = lr.coef_ / sc.scale_
-        icpt = lr.intercept_ - w @ sc.mean_
+        lr = LogisticRegression(C=riemann_parts.RIEMANN_C, max_iter=5000).fit(F_tr, y_cal[m])
+        w, icpt = lr.coef_.copy(), lr.intercept_.copy()
         if n_classes == 2:
             w = np.vstack([np.zeros_like(w), w])
             icpt = np.array([0.0, icpt[0]])
@@ -229,6 +229,7 @@ def evaluate_mu_arms_on_split(
     m_fixed = _fit_single_band_per_person(X_cal, y_cal, p_cal, X_te, bands_fixed, K, n_classes, sfreq)
     m_wide = _fit_single_band_per_person(X_cal, y_cal, p_cal, X_te, bands_wide, K, n_classes, sfreq)
     m_lower = _fit_single_band_per_person(X_cal, y_cal, p_cal, X_te, bands_lower, K, n_classes, sfreq)
+    m_fixed2 = _fit_dual_band_per_person(X_cal, y_cal, p_cal, X_te, [10.5] * K, K, n_classes, sfreq)
     m_dual = _fit_dual_band_per_person(X_cal, y_cal, p_cal, X_te, mu_peaks, K, n_classes, sfreq)
 
     N = len(X_te)
@@ -251,6 +252,7 @@ def evaluate_mu_arms_on_split(
     lp_fix_st, lp_fix_em = _static_and_ema_shuf(m_fixed)
     lp_wid_st, lp_wid_em = _static_and_ema_shuf(m_wide)
     lp_low_st, lp_low_em = _static_and_ema_shuf(m_lower)
+    lp_fx2_st, lp_fx2_em = _static_and_ema_shuf(m_fixed2)
     lp_dua_st, lp_dua_em = _static_and_ema_shuf(m_dual)
 
     # Full-session SPD Fréchet mean adaptation on mu_shift_wide
@@ -274,10 +276,12 @@ def evaluate_mu_arms_on_split(
             "fixed_8_30_static": lp_fix_st,
             "mu_shift_wide_static": lp_wid_st,
             "mu_lower_edge_static": lp_low_st,
+            "fixed_2band_static": lp_fx2_st,
             "mu_beta_2band_static": lp_dua_st,
             "fixed_8_30_ema_shuf": lp_fix_em,
             "mu_shift_wide_ema_shuf": lp_wid_em,
             "mu_lower_edge_ema_shuf": lp_low_em,
+            "fixed_2band_ema_shuf": lp_fx2_em,
             "mu_beta_2band_ema_shuf": lp_dua_em,
             "mu_shift_wide_sess_spd": lp_wid_spd,
         },

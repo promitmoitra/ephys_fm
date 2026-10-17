@@ -134,8 +134,14 @@ def evaluate_all() -> dict:
         "mu_lower_edge_static_vs_fixed_static": evaluate_recenter.paired_summary(
             _collect_l1("mu_lower_edge_static"), _collect_l1("fixed_8_30_static")
         ),
+        "fixed_2band_static_vs_fixed_static": evaluate_recenter.paired_summary(
+            _collect_l1("fixed_2band_static"), _collect_l1("fixed_8_30_static")
+        ),
         "mu_beta_2band_static_vs_fixed_static": evaluate_recenter.paired_summary(
             _collect_l1("mu_beta_2band_static"), _collect_l1("fixed_8_30_static")
+        ),
+        "mu_beta_2band_static_vs_fixed_2band_static": evaluate_recenter.paired_summary(
+            _collect_l1("mu_beta_2band_static"), _collect_l1("fixed_2band_static")
         ),
         "mu_shift_wide_ema_shuf_vs_fixed_ema_shuf": evaluate_recenter.paired_summary(
             _collect_l1("mu_shift_wide_ema_shuf"), _collect_l1("fixed_8_30_ema_shuf")
@@ -143,8 +149,14 @@ def evaluate_all() -> dict:
         "mu_lower_edge_ema_shuf_vs_fixed_ema_shuf": evaluate_recenter.paired_summary(
             _collect_l1("mu_lower_edge_ema_shuf"), _collect_l1("fixed_8_30_ema_shuf")
         ),
+        "fixed_2band_ema_shuf_vs_fixed_ema_shuf": evaluate_recenter.paired_summary(
+            _collect_l1("fixed_2band_ema_shuf"), _collect_l1("fixed_8_30_ema_shuf")
+        ),
         "mu_beta_2band_ema_shuf_vs_fixed_ema_shuf": evaluate_recenter.paired_summary(
             _collect_l1("mu_beta_2band_ema_shuf"), _collect_l1("fixed_8_30_ema_shuf")
+        ),
+        "mu_beta_2band_ema_shuf_vs_fixed_2band_ema_shuf": evaluate_recenter.paired_summary(
+            _collect_l1("mu_beta_2band_ema_shuf"), _collect_l1("fixed_2band_ema_shuf")
         ),
     }
 
@@ -152,10 +164,12 @@ def evaluate_all() -> dict:
     for arm, ref_arm in (
         ("mu_shift_wide_static", "fixed_8_30_static"),
         ("mu_lower_edge_static", "fixed_8_30_static"),
-        ("mu_beta_2band_static", "fixed_8_30_static"),
+        ("fixed_2band_static", "fixed_8_30_static"),
+        ("mu_beta_2band_static", "fixed_2band_static"),
         ("mu_shift_wide_ema_shuf", "fixed_8_30_ema_shuf"),
         ("mu_lower_edge_ema_shuf", "fixed_8_30_ema_shuf"),
-        ("mu_beta_2band_ema_shuf", "fixed_8_30_ema_shuf"),
+        ("fixed_2band_ema_shuf", "fixed_8_30_ema_shuf"),
+        ("mu_beta_2band_ema_shuf", "fixed_2band_ema_shuf"),
         ("mu_shift_wide_sess_spd", "row2_current"),
     ):
         comp_ref = evaluate_recenter.paired_summary(_collect_l2(arm), _collect_l2(ref_arm))
@@ -224,19 +238,21 @@ def format_markdown_report(res: dict) -> str:
     lines.extend(
         [
             "",
-            "### Level 1 Paired Comparisons vs Fixed `8–30 Hz` Counterpart (17 Cross-Day Dev People)",
+            "### Level 1 Paired Comparisons vs Fixed-Band Counterparts (17 Cross-Day Dev People)",
             "",
             "| Comparison | Paired $\\Delta$ BA | 95% Bootstrap CI | Better / Worse / Tied |",
             "|---|---:|---:|---:|",
         ]
     )
     for k, label in [
-        ("mu_shift_wide_static_vs_fixed_static", "`mu_shift_wide_static − fixed_8_30_static`"),
-        ("mu_lower_edge_static_vs_fixed_static", "`mu_lower_edge_static − fixed_8_30_static`"),
-        ("mu_beta_2band_static_vs_fixed_static", "`mu_beta_2band_static − fixed_8_30_static`"),
-        ("mu_shift_wide_ema_shuf_vs_fixed_ema_shuf", "`mu_shift_wide_ema_shuf − fixed_8_30_ema_shuf`"),
-        ("mu_lower_edge_ema_shuf_vs_fixed_ema_shuf", "`mu_lower_edge_ema_shuf − fixed_8_30_ema_shuf`"),
-        ("mu_beta_2band_ema_shuf_vs_fixed_ema_shuf", "`mu_beta_2band_ema_shuf − fixed_8_30_ema_shuf`"),
+        ("mu_shift_wide_static_vs_fixed_static", "`mu_shift_wide_static − fixed_8_30_static` (1-band shift)"),
+        ("mu_lower_edge_static_vs_fixed_static", "`mu_lower_edge_static − fixed_8_30_static` (1-band lower edge)"),
+        ("fixed_2band_static_vs_fixed_static", "`fixed_2band_static − fixed_8_30_static` (fixed `[8,13]+[13,30]` vs `[8,30]`)"),
+        ("mu_beta_2band_static_vs_fixed_2band_static", "`mu_beta_2band_static − fixed_2band_static` (**personal $\\mu$ vs fixed 2-band**)"),
+        ("mu_shift_wide_ema_shuf_vs_fixed_ema_shuf", "`mu_shift_wide_ema_shuf − fixed_8_30_ema_shuf` (1-band shift + EMA)"),
+        ("mu_lower_edge_ema_shuf_vs_fixed_ema_shuf", "`mu_lower_edge_ema_shuf − fixed_8_30_ema_shuf` (1-band lower + EMA)"),
+        ("fixed_2band_ema_shuf_vs_fixed_ema_shuf", "`fixed_2band_ema_shuf − fixed_8_30_ema_shuf` (fixed `[8,13]+[13,30]` + EMA)"),
+        ("mu_beta_2band_ema_shuf_vs_fixed_2band_ema_shuf", "`mu_beta_2band_ema_shuf − fixed_2band_ema_shuf` (**personal $\\mu$ vs fixed 2-band + EMA**)"),
     ]:
         cmp = c1[k]
         lines.append(
@@ -256,10 +272,12 @@ def format_markdown_report(res: dict) -> str:
     ref_map = {
         "mu_shift_wide_static": "fixed_8_30_static",
         "mu_lower_edge_static": "fixed_8_30_static",
-        "mu_beta_2band_static": "fixed_8_30_static",
+        "fixed_2band_static": "fixed_8_30_static",
+        "mu_beta_2band_static": "fixed_2band_static",
         "mu_shift_wide_ema_shuf": "fixed_8_30_ema_shuf",
         "mu_lower_edge_ema_shuf": "fixed_8_30_ema_shuf",
-        "mu_beta_2band_ema_shuf": "fixed_8_30_ema_shuf",
+        "fixed_2band_ema_shuf": "fixed_8_30_ema_shuf",
+        "mu_beta_2band_ema_shuf": "fixed_2band_ema_shuf",
         "mu_shift_wide_sess_spd": "row2_current",
     }
     for arm in mu_band.PROTOCOL02_ARMS:
