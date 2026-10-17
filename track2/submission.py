@@ -95,24 +95,138 @@ class FBFingerprint(nn.Module):
         return self.linear(self.features(X).to(self.linear.weight.dtype))
 
 
+def hermitian_cov(Z, rho=0.05):
+    """Trace-shrunk Hermitian sample covariance of analytic signals Z (..., C, T)."""
+    n_times, n_chans = Z.shape[-1], Z.shape[-2]
+    gamma = (Z @ Z.mH) / n_times
+    tr = torch.diagonal(gamma.real, dim1=-2, dim2=-1).sum(-1)
+    eye = torch.eye(n_chans, dtype=Z.dtype, device=Z.device)
+    return (1.0 - rho) * gamma + rho * (tr / n_chans)[..., None, None] * eye
+
+
+def complex_tangent(C_hpd, cref_isqrt):
+    """Project C_hpd (..., C, C) to tangent space at cref_isqrt = Cref^-1/2 and vectorize
+    into C^2 real coordinates: [diag(Re(L)), sqrt(2)*triu_1(Re(L)), sqrt(2)*triu_1(Im(L))]."""
+    M = cref_isqrt @ C_hpd @ cref_isqrt
+    w, V = torch.linalg.eigh(M)
+    w = torch.clamp(w, min=1e-12)
+    L = (V * torch.log(w).unsqueeze(-2)) @ V.mH
+    n_chans = L.shape[-1]
+    triu_i, triu_j = torch.triu_indices(n_chans, n_chans, offset=1, device=L.device)
+    s2 = 2.0 ** 0.5
+    diag = torch.diagonal(L.real, dim1=-2, dim2=-1)
+    re_off = L.real[..., triu_i, triu_j] * s2
+    im_off = L.imag[..., triu_i, triu_j] * s2
+    return torch.cat([diag, re_off, im_off], dim=-1)
+
+
+class ComplexFBFingerprint(nn.Module):
+    """p(subject | window) from per-band complex Hermitian covariances (PR #15).
+
+    Each band's zero-phase band-pass + Hilbert transform on the fixed-length window
+    is one complex64 (T, T) matrix; per band trace-shrunk Hermitian covariance →
+    complex tangent space at the complex Fréchet geometric mean; bands concatenated →
+    standardised multinomial logistic regression, folded into one linear layer."""
+
+    def __init__(self, n_bands, n_chans, n_times, n_subjects, rho=0.05):
+        super().__init__()
+        self.rho = float(rho)
+        n_feat = n_bands * n_chans * n_chans
+        self.register_buffer("filters", torch.zeros(n_bands, n_times, n_times, dtype=torch.complex64))
+        self.register_buffer("cref_isqrt", torch.zeros(n_bands, n_chans, n_chans, dtype=torch.complex64))
+        self.linear = nn.Linear(n_feat, n_subjects)
+
+    def features(self, X):
+        """Concatenated per-band complex tangent features (B, F)."""
+        Xc = X.to(self.filters.dtype)
+        feats = [
+            complex_tangent(hermitian_cov(Xc @ F, rho=self.rho), W)
+            for F, W in zip(self.filters, self.cref_isqrt)
+        ]
+        return torch.cat(feats, dim=-1)
+
+    def forward(self, X):
+        """Logits (B, K)."""
+        return self.linear(self.features(X).to(self.linear.weight.dtype))
+
+
 class RiemannExperts(nn.Module):
     """K per-participant tangent-space logistic regressions (loop B); float64.
 
-    Shared band-pass-and-crop matrix (T, T'), per-participant reference
-    Cref^-1/2 and class weights. forward -> log-probabilities (B, K, C)."""
+    Supports:
+    - 2-band individualized mu/beta decomposition ('mu_beta_2band', winning design):
+      filters: (K, 2, n_times, n_times_out)
+      cref_isqrt: (K, 2, n_chans, n_chans)
+      weight: (K, n_classes, 2 * n_feat)
+    - legacy 1-band ('fixed_8_30'):
+      filt: (n_times, n_times_out)
+      cref_isqrt: (K, n_chans, n_chans)
+      weight: (K, n_classes, n_feat)
 
-    def __init__(self, n_subjects, n_chans, n_times, n_times_out, n_classes):
+    Online test-time adaptation:
+    - Maintains a causal running tangent barycenter state `running_mu: (K, F)`
+      updated by: mu_k <- (1 - alpha * gamma_tk) * mu_k + alpha * gamma_tk * f_tk,
+      subtracting mu_k from the test window's tangent vector before classification."""
+
+    def __init__(self, n_subjects, n_chans, n_times, n_times_out, n_classes,
+                 n_bands=2, online_adaptation=True, online_alpha=0.05):
         super().__init__()
-        n_feat = n_chans * (n_chans + 1) // 2
+        self.n_subjects = n_subjects
+        self.n_chans = n_chans
+        self.n_bands = n_bands
+        self.n_times = n_times
+        self.n_times_out = n_times_out
+        self.n_classes = n_classes
+        self.n_single_feat = n_chans * (n_chans + 1) // 2
+        self.n_feat = self.n_bands * self.n_single_feat
+        self.online_adaptation = online_adaptation
+        self.alpha = float(online_alpha)
         d = torch.float64
-        self.register_buffer("filt", torch.zeros(n_times, n_times_out, dtype=d))
-        self.register_buffer("cref_isqrt", torch.zeros(n_subjects, n_chans, n_chans, dtype=d))
-        self.register_buffer("weight", torch.zeros(n_subjects, n_classes, n_feat, dtype=d))
-        self.register_buffer("bias", torch.zeros(n_subjects, n_classes, dtype=d))
 
-    def forward(self, X):
-        C = oas(X.to(self.filt.dtype) @ self.filt)                      # (B, c, c)
-        f = tangent(C[:, None], self.cref_isqrt[None])                    # (B, K, F)
+        if n_bands == 1:
+            self.register_buffer("filt", torch.zeros(n_times, n_times_out, dtype=d))
+            self.register_buffer("cref_isqrt", torch.zeros(n_subjects, n_chans, n_chans, dtype=d))
+        else:
+            self.register_buffer("filters", torch.zeros(n_subjects, n_bands, n_times, n_times_out, dtype=d))
+            self.register_buffer("cref_isqrt", torch.zeros(n_subjects, n_bands, n_chans, n_chans, dtype=d))
+
+        self.register_buffer("weight", torch.zeros(n_subjects, n_classes, self.n_feat, dtype=d))
+        self.register_buffer("bias", torch.zeros(n_subjects, n_classes, dtype=d))
+        self.register_buffer("running_mu", torch.zeros(n_subjects, self.n_feat, dtype=d), persistent=False)
+
+    def reset_adaptation(self):
+        """Reset online running tangent barycenter to zero."""
+        self.running_mu = torch.zeros(self.n_subjects, self.n_feat,
+                                      dtype=self.weight.dtype,
+                                      device=self.weight.device)
+
+    def forward(self, X, p_subject=None):
+        """X: (B, C, T) float32/float64. p_subject: optional (B, K) posterior for online adaptation."""
+        if hasattr(self, "filt"):
+            C = oas(X.to(self.filt.dtype) @ self.filt)                      # (B, C, C)
+            f = tangent(C[:, None], self.cref_isqrt[None])                  # (B, K, F)
+        else:
+            Xd = X.to(self.filters.dtype)
+            f_all = []
+            for k in range(self.n_subjects):
+                f_k = []
+                for b in range(self.n_bands):
+                    X_kb = Xd @ self.filters[k, b]                         # (B, C, T_out)
+                    C_kb = oas(X_kb)                                       # (B, C, C)
+                    f_kb = tangent(C_kb, self.cref_isqrt[k, b])            # (B, F_single)
+                    f_k.append(f_kb)
+                f_all.append(torch.cat(f_k, dim=-1))                       # (B, n_bands * F_single)
+            f = torch.stack(f_all, dim=1)                                  # (B, K, F)
+
+        if self.online_adaptation and p_subject is not None:
+            gamma = p_subject.to(f.dtype)                                   # (B, K)
+            f_adapted = torch.empty_like(f)
+            for t in range(f.shape[0]):
+                eta = (self.alpha * gamma[t]).unsqueeze(-1)                 # (K, 1)
+                self.running_mu = (1.0 - eta) * self.running_mu + eta * f[t]
+                f_adapted[t] = f[t] - self.running_mu
+            f = f_adapted
+
         logits = torch.einsum("bkf,kcf->bkc", f, self.weight) + self.bias
         return torch.log_softmax(logits, -1)
 
@@ -238,14 +352,17 @@ class FingerprintMixture(nn.Module):
     """Fingerprint-weighted mixture of per-participant experts."""
 
     def __init__(self, n_chans, n_times, n_classes, n_experts, channel_index=None,
-                 fingerprint="eegnet", n_bands=6, riemann_n_times_out=None, shallow=False,
-                 reve_encoder=None, n_reve_out=None, combiner="C3", sfreq=120.0):
+                 fingerprint="complex_6b", n_bands=6, riemann_n_times_out=None,
+                 riemann_n_bands=2, online_adaptation=True, online_alpha=0.05,
+                 shallow=False, reve_encoder=None, n_reve_out=None, combiner="C3", sfreq=120.0):
         super().__init__()
         self.fingerprint_kind = fingerprint
         if fingerprint == "eegnet":
             self.fingerprint = EEGNet(n_chans=n_chans, n_outputs=n_experts, n_times=n_times)
         elif fingerprint == "fb_riemann":
             self.fingerprint = FBFingerprint(n_bands, n_chans, n_times, n_experts)
+        elif fingerprint in ("complex_6b", "complex"):
+            self.fingerprint = ComplexFBFingerprint(n_bands, n_chans, n_times, n_experts)
         else:
             raise ValueError(f"unknown fingerprint {fingerprint!r}")
         self.experts = nn.ModuleList(
@@ -263,7 +380,10 @@ class FingerprintMixture(nn.Module):
         self.riemann = self.combiner = None
         if riemann_n_times_out is not None:
             self.riemann = RiemannExperts(n_experts, n_chans, n_times,
-                                          riemann_n_times_out, n_classes)
+                                          riemann_n_times_out, n_classes,
+                                          n_bands=riemann_n_bands,
+                                          online_adaptation=online_adaptation,
+                                          online_alpha=online_alpha)
             if combiner == "C3":
                 self.combiner = LogLinearCombiner(n_experts, n_classes)
             elif combiner == "portfolio":
@@ -280,7 +400,12 @@ class FingerprintMixture(nn.Module):
                             else range(n_chans), dtype=torch.long),
             persistent=False)
 
-    def expert_logp(self, X):
+    def reset_adaptation(self):
+        """Reset running adaptation state."""
+        if self.riemann is not None:
+            self.riemann.reset_adaptation()
+
+    def expert_logp(self, X, p_subject=None):
         """Per-participant class log-probabilities (B, K, C), before routing.
 
         Neural streams in the combiner's order: EEGNet, ShallowFBCSPNet, REVE."""
@@ -292,15 +417,16 @@ class FingerprintMixture(nn.Module):
             neural.append(self.reve(X))
         if self.riemann is None:
             return neural[0]
+        lp_riemann = self.riemann(X, p_subject=p_subject)
         if self.combiner_kind == "C3":
-            return self.combiner(neural[0], self.riemann(X))
-        return self.combiner(neural, self.riemann(X))
+            return self.combiner(neural[0], lp_riemann)
+        return self.combiner(neural, lp_riemann)
 
     def forward(self, X):
         """Mixture class probabilities, (B, n_classes)."""
         X = X.index_select(1, self.channel_index)
         p_subject = torch.softmax(self.fingerprint(X), dim=1)            # (B, K)
-        p_class = self.expert_logp(X).exp()                              # (B, K, C)
+        p_class = self.expert_logp(X, p_subject=p_subject).exp()          # (B, K, C)
         return (p_subject.unsqueeze(-1).to(p_class.dtype) * p_class).sum(1)
 
     @torch.inference_mode()
@@ -326,13 +452,41 @@ def build_model(meta, config, state=None):
         raise ValueError(f"sfreq {meta['sfreq']} != trained {config['sfreq']}")
     use_riemann = config.get("riemann_experts", False)
     encoder = load_reve_encoder(meta["submission_dir"]) if config.get("reve_probe") else None
+
+    # Resolve fingerprint kind with backward compatibility
+    fp_kind = config.get("fingerprint")
+    if fp_kind is None:
+        if state is not None and "fingerprint" in state:
+            fp_sd = state["fingerprint"]
+            if "filters" in fp_sd and fp_sd["filters"].dtype in (torch.complex64, torch.complex128):
+                fp_kind = "complex_6b"
+            elif "filters" in fp_sd:
+                fp_kind = "fb_riemann"
+            else:
+                fp_kind = "eegnet"
+        else:
+            fp_kind = "complex_6b"
+
+    # Resolve riemann bands mode
+    riemann_n_bands = config.get("riemann_n_bands")
+    if riemann_n_bands is None:
+        if config.get("riemann_bands") == "mu_beta_2band":
+            riemann_n_bands = 2
+        elif state is not None and "riemann" in state and "filters" in state["riemann"]:
+            riemann_n_bands = state["riemann"]["filters"].shape[1]
+        else:
+            riemann_n_bands = 1
+
     model = FingerprintMixture(
         n_chans=len(train_chs), n_times=config["n_times"],
         n_classes=config["n_classes"], n_experts=len(config["experts"]),
         channel_index=[eval_chs.index(c) for c in train_chs],
-        fingerprint=config.get("fingerprint", "eegnet"),
+        fingerprint=fp_kind,
         n_bands=config.get("fingerprint_n_bands", 6),
         riemann_n_times_out=config["riemann_n_times_out"] if use_riemann else None,
+        riemann_n_bands=riemann_n_bands,
+        online_adaptation=config.get("online_adaptation", True),
+        online_alpha=config.get("online_alpha", 0.05),
         shallow=config.get("shallow_experts", False), reve_encoder=encoder,
         n_reve_out=config.get("reve_n_out"), combiner=config.get("combiner", "C3"),
         sfreq=config.get("sfreq", 120.0))
@@ -351,6 +505,7 @@ def build_model(meta, config, state=None):
         if use_riemann:
             model.riemann.load_state_dict(state["riemann"])
             model.combiner.load_state_dict(state["combiner"])
+    model.reset_adaptation()
     return model.to(meta["device"]).eval()
 
 
