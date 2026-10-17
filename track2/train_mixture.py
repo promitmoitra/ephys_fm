@@ -49,8 +49,9 @@ import torch.nn.functional as F
 from sklearn.metrics import balanced_accuracy_score
 
 REPO = Path(__file__).resolve().parents[1]
-KIT = REPO / "external" / "2026-competition"
-DATA = REPO / "data"
+ROOT = REPO if (REPO / "external" / "2026-competition").exists() else REPO.parents[2]
+KIT = ROOT / "external" / "2026-competition"
+DATA = ROOT / "data"
 sys.path[:0] = [str(KIT), str(Path(__file__).resolve().parent)]
 
 from submission import build_model  # noqa: E402  (the shipped code path)
@@ -218,7 +219,10 @@ def main():
     ap.add_argument("--fp-epochs", type=int, default=150, help="EEGNet fingerprint")
     ap.add_argument("--ft-epochs", type=int, default=50, help="per-person")
     ap.add_argument("--threads", type=int, default=8)
-    ap.add_argument("--fingerprint", choices=["fb_riemann", "eegnet"], default="fb_riemann")
+    ap.add_argument("--fingerprint", choices=["complex_6b", "fb_riemann", "eegnet"], default="complex_6b")
+    ap.add_argument("--riemann-bands", choices=["mu_beta_2band", "fixed_8_30"], default="mu_beta_2band")
+    ap.add_argument("--no-online-adaptation", action="store_true")
+    ap.add_argument("--online-alpha", type=float, default=0.05)
     ap.add_argument("--no-riemann-experts", action="store_true")
     ap.add_argument("--reuse-eegnet", type=Path, default=None,
                     help="mixture.pt whose EEGNet experts (and EEGNet fingerprint) to reuse")
@@ -294,7 +298,11 @@ def main():
             experts.append(expert)
 
     # 2. fingerprint: who is this (among the evaluation people)?
-    if args.fingerprint == "fb_riemann":
+    if args.fingerprint == "complex_6b":
+        log("fingerprint: 6-band complex Hermitian covariance model on all calibration runs")
+        fp_state = riemann_parts.fit_complex_fingerprint(X[calib], lab[calib], sfreq)
+        info_fp = {"kind": "complex_6b", "bands": riemann_parts.FP_BANDS}
+    elif args.fingerprint == "fb_riemann":
         log("fingerprint: filter-bank covariance model on all calibration runs")
         fp_state = riemann_parts.fit_fingerprint(X[calib], lab[calib], sfreq)
         info_fp = {"kind": "fb_riemann", "bands": riemann_parts.FP_BANDS}
@@ -316,12 +324,17 @@ def main():
     state = {"fingerprint": fp_state, "experts": [e.state_dict() for e in experts]}
     config_extra = {"fingerprint": args.fingerprint,
                     "fingerprint_n_bands": len(riemann_parts.FP_BANDS),
-                    "riemann_experts": not args.no_riemann_experts}
+                    "riemann_experts": not args.no_riemann_experts,
+                    "riemann_bands": args.riemann_bands,
+                    "riemann_n_bands": 2 if args.riemann_bands == "mu_beta_2band" else 1,
+                    "online_adaptation": not args.no_online_adaptation,
+                    "online_alpha": args.online_alpha}
     rel = None
     if not args.no_riemann_experts:
-        log("per-person Riemannian experts and calibration reliability")
+        log(f"per-person Riemannian experts ({args.riemann_bands}) and calibration reliability")
         state["riemann"], state["combiner"], rel, n_out = riemann_parts.fit_riemann(
-            X[calib], y[calib], lab[calib], run[calib], K, n_classes, sfreq)
+            X[calib], y[calib], lab[calib], run[calib], K, n_classes, sfreq,
+            bands_mode=args.riemann_bands)
         config_extra |= {"riemann_n_times_out": int(n_out), "combiner": "C3",
                          "combiner_coef": riemann_parts.C3}
 
@@ -395,15 +408,17 @@ def main():
     mixture = build_model(meta, json.loads((sub_dir / "config.json").read_text()), state)
     Xh, yh, sh = X[hidden], y[hidden], subj[hidden]
     t0 = time.time()
+    mixture.reset_adaptation()
     p_mix = torch.cat([mixture.predict(torch.from_numpy(Xh[i:i + 256]))
                        for i in range(0, len(Xh), 256)]).numpy()
     infer_s = time.time() - t0
+    mixture.reset_adaptation()
     with torch.inference_mode():
         Xt = torch.from_numpy(Xh)
         p_subj = torch.softmax(mixture.fingerprint(Xt), 1).double()
         lp_eeg = torch.stack([torch.log_softmax(e(Xt), 1) for e in mixture.experts],
                              1).double()
-        lp_all = torch.cat([mixture.expert_logp(Xt[i:i + 256])
+        lp_all = torch.cat([mixture.expert_logp(Xt[i:i + 256], p_subject=p_subj[i:i + 256])
                             for i in range(0, len(Xt), 256)]).double()
     n = torch.arange(len(Xh))
     true_idx = torch.as_tensor([s_idx[s] for s in sh])
